@@ -2,106 +2,264 @@
 
 <img src="docs/images/project-icon.png" alt="ReStreet" width="64">
 
-# ReStreet on macOS
+# ReStreet for macOS
 
-**FIFA Street (2012), recompiled for Mac. Bring your own game.**
+**FIFA Street (2012), running natively on Apple Silicon.**
 
-[Mac setup](docs/BUILDING-MACOS.md) · [Controls](docs/CONTROLS-MACOS.md) · [Progress and diagnostics](LOG/PROGRESS.md) · [Agent instructions](AGENTS.md)
+A source-build Mac port by **[fyzanshaik](https://github.com/fyzanshaik)**, built on
+**[SamuelitoDaVila's ReStreet](https://github.com/samuelit0davila/fifa-street-pc-port)**.
+
+[Get started](#get-started) · [Architecture](#how-it-works) · [Controls](#keyboard-controls) · [Performance](#performance-and-fixes) · [Engineering log](LOG/PROGRESS.md)
 
 </div>
 
-This is [FyZan Shaik's macOS fork](https://github.com/fyzanshaik/fifa-street-pc-port/tree/main) of **[SamuelitoDaVila's ReStreet](https://github.com/samuelit0davila/fifa-street-pc-port)**. SamuelitoDaVila created the original Windows port, installer and launcher. This fork builds on that work to make the game usable, buildable and easy to experiment with on macOS.
+This fork adds macOS support to the original Windows project. It recompiles
+supported Xbox 360 game binaries into native **arm64** code using ReXGlue and
+reuses the existing **Vulkan renderer**, with **MoltenVK translating Vulkan calls
+to Apple's Metal API**. It also adds the Mac build, runtime fixes, app packaging,
+keyboard profile and diagnostics needed to play and develop on a Mac.
 
-Our longer-term goal is **agentic game benchmarks**: human versus AI and AI versus AI, with repeatable observations, actions and evaluation results. Getting a reliable Mac game comes first. Experimental capture and virtual-controller tools exist; an end-to-end AI benchmark, model integration and deterministic evaluation environment are future work.
+The long-term goal is **agentic game benchmarks**: human versus AI and AI versus
+AI, with repeatable observations, actions and evaluation results. A usable,
+reproducible Mac game is the foundation.
 
-## Current status
+## Status
 
-On the tested Apple Silicon MacBook, the game builds natively, boots, accepts keyboard input and has reached playable matches. The latest manual feedback reports good gameplay and improved music and menu response. We have paused further performance tuning to finish the play/install experience.
+| Area | Current state |
+|---|---|
+| Apple Silicon | Native build; boot, menus and playable matches manually checked |
+| Gameplay and audio | Latest feedback reports good gameplay and improved music/menu response |
+| Distribution | Source-build preview; no downloadable Mac game binary |
+| Performance | About 25 distinct displayed outputs/sec in late main-menu diagnostics; sustained 60 FPS unverified |
+| Intel Macs | Untested |
+| AI benchmarks | Experimental capture/controller seams exist; model integration and end-to-end evaluations are future work |
 
-This is a **source-build Mac preview**, not a downloadable Mac binary release. Sustained 60 FPS, every game mode, save/reload, multiple controllers and live resizing are not fully validated. Late main-menu diagnostics measured around 25 new displayed outputs per second. Intel Macs are untested. See [validation status](docs/STATUS.md) and the [complete engineering log](LOG/PROGRESS.md) for evidence and limitations.
+Tested on an **Apple M5 MacBook, 16 GB RAM, macOS 26.6.2**. Save/reload, every
+mode, multiple controllers and live resizing are not fully validated. See the
+[validation status](docs/STATUS.md) and [engineering log](LOG/PROGRESS.md) for
+what was measured and what remains open.
 
-## Build and play on Mac
+## Get started
 
-You need an Apple Silicon Mac, Xcode 16+ / AppleClang 16+ (or LLVM Clang 18+), CMake, Ninja, Python 3 and your own extracted FIFA Street (2012) Xbox 360 `GameData`. Only the [validated module revision](scripts/supported-macos-inputs.json) is supported. Game assets and original executables are not included.
+### 1. Prepare your Mac and game data
+
+You need:
+
+- An **Apple Silicon Mac**.
+- Xcode command line tools with **AppleClang 16+**, or LLVM Clang 18+, for C++23.
+- **CMake, Ninja and Python 3.9+**.
+- Your own extracted **FIFA Street (2012) Xbox 360 `GameData`**, matching the
+  [supported module revision](scripts/supported-macos-inputs.json).
+
+Game assets and original executables are not included. This repository contains
+the port's host code, runtime patches and build tools, rather than original EA
+source code. The build validates your module hashes before compilation.
+
+### 2. Clone, check and build
 
 ```sh
 git clone --branch main https://github.com/fyzanshaik/fifa-street-pc-port.git
 cd fifa-street-pc-port
 brew install cmake ninja
 
+# Check tools and game inputs before compiling.
+./scripts/build-macos.sh --gamedata "/absolute/path/to/GameData" --check-only
+
+# Build and package the Mac app.
 ./scripts/build-macos.sh --gamedata "/absolute/path/to/GameData" --jobs 2
+```
+
+Install Python with `brew install python` if `python3` is missing. The build
+prepares the pinned SDK and bundled Vulkan/MoltenVK dependencies; no separate
+Homebrew Vulkan installation is needed. The first build takes time. Subsequent
+builds reuse the SDK and generated code.
+
+### 3. Play or install
+
+Run the built app:
+
+```sh
 ./scripts/play-macos.sh
 ```
 
-The build pins and prepares ReXGlue, applies the Mac patches, recompiles your game and packages `build/macos/out/FIFA Street.app`. The first build takes time; later builds reuse the SDK and generated code. `--check-only` validates prerequisites and game inputs before compiling.
-
-To install the built app for Finder access without copying game assets:
+Or install it into `~/Applications` for Finder access:
 
 ```sh
 ./scripts/install-macos.sh
 ```
 
-This installs into `~/Applications`; an existing app is replaced only with
-`--force`. The normal play command has **no time limit**. You can also open the produced `.app` in Finder. Keep the original `GameData` folder in place: the app links to it instead of copying it. Follow the [Mac setup guide](docs/BUILDING-MACOS.md) for installation, toolchain troubleshooting, rebuilding and logs.
+The output is `build/macos/out/FIFA Street.app`. Installation copies the app
+without copying game assets; **keep your original `GameData` folder in place**,
+because the app links to it. An existing installation is replaced only with
+`--force`. Normal play has **no time limit**.
 
-## Watch session logs
+For toolchain help, rebuild options and packaging details, use the
+[Mac setup guide](docs/BUILDING-MACOS.md).
 
-From the repository, start this in a separate Terminal before or after launching
-with `scripts/play-macos.sh`:
+## Watch live session logs
+
+From the repository, start the viewer in **Terminal 1**:
 
 ```sh
 ./scripts/logs-macos.sh
 ```
 
-The watcher shows the latest session and switches automatically on the next
-launch. With no sessions yet, it waits. **Ctrl+C stops the log viewer only.**
-For an installed app, launch in another Terminal with
-`./scripts/play-macos.sh "$HOME/Applications/FIFA Street.app"`. The
-[Mac guide](docs/BUILDING-MACOS.md#logs-and-troubleshooting) explains session
-selection and Finder log locations.
+Launch the installed app in **Terminal 2**:
 
-## Basic keyboard controls
+```sh
+./scripts/play-macos.sh "$HOME/Applications/FIFA Street.app"
+```
 
-The shipped profile keeps **arrows for movement** and **Space to confirm/pass**. Xbox button prompts remain in the game.
+The viewer can start before or after the game. It prints the latest session's
+last 20 lines, follows new lines and automatically switches on subsequent
+launches. **Ctrl+C stops only the viewer.** Each normal-play session is retained
+under `build/macos/logs/play/<UTC>/fifastreet.log`.
 
-| Key | Action / Xbox button |
+Finder launches use separate logs inside the app bundle. Direct driver messages
+such as MoltenVK notices remain in the launch Terminal. See
+[log options and locations](docs/BUILDING-MACOS.md#logs-and-troubleshooting) to
+pin a session or change the history length.
+
+## How it works
+
+### Build: original binaries to a native Mac app
+
+ReXGlue's recompilation technology comes from the upstream projects. This fork
+adapts the build and runtime for macOS and saves those changes as reproducible
+patches.
+
+```mermaid
+flowchart TD
+    Data["Your Xbox 360 GameData"] --> Check["Validate supported module hashes"]
+    Check --> Generate["ReXGlue: PowerPC binaries to generated C++"]
+    SDK["Pinned ReXGlue SDK + saved Mac patches"] --> Compile["C++23 / CMake / Ninja: compile for arm64"]
+    Generate --> Compile
+    Compile --> App["FIFA Street.app"]
+    App --> Install["Optional install into ~/Applications"]
+    Data -. "App links to assets; no asset copy" .-> App
+```
+
+Generated game code, the local SDK checkout and build products are not committed.
+The app still needs your original game data at runtime.
+
+### Runtime: native CPU code, Vulkan graphics through Metal
+
+The existing Vulkan renderer is reused; it is not replaced by a new Metal
+renderer. MoltenVK supplies the graphics compatibility layer.
+
+```mermaid
+flowchart LR
+    Game["Recompiled game code<br/>Native Apple Silicon / arm64"] --> Runtime["ReXGlue runtime + Mac support"]
+    Runtime --> Platform["Cocoa / SDL<br/>Window, input and audio"]
+    Runtime --> Vulkan["Existing Vulkan renderer"]
+    Vulkan --> MoltenVK["MoltenVK"]
+    MoltenVK --> Metal["Apple Metal"]
+    Metal --> GPU["Apple GPU"]
+```
+
+## Keyboard controls
+
+For a first match: **arrows** move, **E** sprints, **Space** passes and **D**
+shoots. Xbox button prompts remain visible in the game.
+
+| Key | Default action / Xbox input |
 |---|---|
-| Arrow keys | Move player or menu selection / left stick |
-| Space | Confirm, pass / A |
-| D or Backspace | Back in menus, shoot / B |
-| A | Lob pass, manual tackle / X |
-| S | Through pass, hold to rush goalkeeper / Y |
-| E | Sprint / RT |
-| Q | Street Ball Control, defensive jockey / LT |
-| W | Flair modifier, change defender / LB |
-| R | Flick ball up / RB |
-| I, J, K, L | Skill-stick directions / right stick |
-| Enter | Start / pause |
+| Arrow keys | Player movement or menu selection / left stick |
+| Space | Confirm or ground pass / A |
+| D or Backspace (Mac Delete) | Back in menus or shoot / B |
+| A | Lob pass or manual tackle / X |
+| S | Through pass; hold to rush goalkeeper / Y |
+| E / Q | Sprint / RT; Street Ball Control or defensive jockey / LT |
+| W / R | Flair modifier or switch defender / LB; flick ball up / RB |
+| I / J / K / L | Skill-stick up / left / down / right |
+| Enter | Start or pause |
 
-For a first match, use **arrows + E** to run, **Space** to pass, and **D** to shoot. Hold Enter and press D to open the host exit prompt; Space confirms. Closing the game window also exits.
+Close the window to exit, or hold **Enter** and press **D** for the host exit
+prompt; **Space** confirms. The [full controls guide](docs/CONTROLS-MACOS.md)
+covers stick clicks, tactics and customization. Actions follow the default
+layout in [EA's Xbox 360 manual](https://eaassets-a.akamaihd.net/eahelp/manuals/fifa-street-manuals_Microsoft%20XBOX360.pdf);
+custom in-game controller layouts can change them.
 
-The [full key reference](docs/CONTROLS-MACOS.md) includes stick clicks, tactics and customization. Gameplay actions follow [EA's FIFA Street Xbox 360 manual](https://eaassets-a.akamaihd.net/eahelp/manuals/fifa-street-manuals_Microsoft%20XBOX360.pdf); custom in-game controller layouts can change them.
+## Performance and fixes
 
-## What changed for Mac
+The port initially had build/boot failures, black screens, severe menu delays
+and broken-sounding audio. The main improvements were:
 
-- Native Apple Silicon build and `.app` packaging with Vulkan through bundled MoltenVK.
-- Mac module loading, build portability and bounded generated registration tables.
-- Guest startup event ordering and PowerPC memory barriers.
-- Precise idle waits, dormant-overlay redraw suppression and stable host presentation settings.
-- Correct shader-cache reload on Darwin and an accurate Mac guest clock without a shared mutex on every read.
-- Arrow-key controls and opt-in frame, audio and CPU diagnostics with focused regression tests.
+| Fix | Effect |
+|---|---|
+| Mac loading, startup ordering and PowerPC memory barriers | Correct native startup and guest synchronization |
+| Precise idle waits | Idle audio-worker CPU fell from about 100% to 1% of one core in the runtime fixture |
+| Dormant overlays and host presentation | Removed unnecessary redraws and reduced graphics queue contention |
+| Shader-cache reload on Darwin | Reused persisted pipelines instead of resetting caches each launch |
+| Anchored guest clock | Preserved fractional ticks and removed a shared mutex from frequent clock reads |
+| Build, packaging and controls | Reproducible app builds, installation, arrow-key input and session logs |
 
-All SDK changes are saved as patches applied to the pinned source. `ReXGlue/` and generated guest code are local build products. Read [LOG/PROGRESS.md](LOG/PROGRESS.md) before changing performance settings: it records successful fixes, unsuccessful comparisons, measurement limits and mistakes to avoid.
+Selected recorded results:
 
-## Windows and upstream
+| Measurement | Before | After |
+|---|---:|---:|
+| Repeated host presentations, overlay comparison | 20,101 | 2 |
+| Accumulated queue-acquisition wall time, overlay comparison | 72.600 s | 0.145 s |
+| Guest clock / host rate, one-reader fixture | 0.960726 | Approximately 1.0 |
 
-The original Windows installer, launcher and build path are preserved. Use [SamuelitoDaVila's releases](https://github.com/samuelit0davila/fifa-street-pc-port/releases) for Windows downloads and [docs/BUILDING.md](docs/BUILDING.md) to build the Windows version. Those `.exe` downloads are not Mac installers. The Windows v1.1 changes are retained. Mac builds use a separate saved base patch from the version we tested; the newer Windows SDK changes have not been validated on Mac.
+The latest late main-menu sample measured **24.565 new displayed outputs/sec**
+with **zero backend-inserted audio silence**. Host redraws can repeat a frame,
+so this is not a simulation-FPS measurement or proof of 60 FPS. Zero inserted
+silence does not prove perfect physical playback. Comparisons span separate
+runs with different screen/cache conditions; they are not a controlled match
+benchmark.
 
-## Credits and license
+Read the [measurement comparisons](LOG/PROGRESS.md#selected-comparable-measurements)
+and [sanitized evidence](LOG/evidence/macos-measurements.json) for provenance,
+failed experiments and limits. Further optimization is currently paused after
+improved manual gameplay feedback.
+
+## Future: agentic game benchmarks
+
+The aim is to run human/AI and AI/AI matches, compare decision latency and game
+outcomes, and make evaluations repeatable. Experimental frame capture and
+virtual-controller seams provide a starting point.
+
+The next work is to validate an observation/action loop, define reset and scoring
+rules, then integrate decision APIs and run measured comparisons. **No model
+integration, deterministic evaluation environment or end-to-end AI benchmark is
+claimed today.**
+
+## Documentation
+
+| Guide | Purpose |
+|---|---|
+| [Mac setup](docs/BUILDING-MACOS.md) | Prerequisites, supported inputs, build, install and troubleshooting |
+| [Controls](docs/CONTROLS-MACOS.md) | Keyboard reference and customization |
+| [Validation status](docs/STATUS.md) | Verified behavior and remaining gaps |
+| [Progress and diagnostics](LOG/PROGRESS.md) | Findings, measurements, failed approaches and lessons |
+| [Agent instructions](AGENTS.md) | Workflow, validation and mistakes to avoid |
+
+## Windows support
+
+The original Windows installer, launcher and build path—including the Windows
+v1.1 changes—are preserved. Use [upstream releases](https://github.com/samuelit0davila/fifa-street-pc-port/releases)
+for Windows downloads and the [Windows build guide](docs/BUILDING.md) to compile
+it. Those `.exe` downloads are not Mac installers.
+
+Mac builds use a separate saved base patch from the version validated here.
+Newer Windows SDK changes require separate Mac validation before adoption.
+
+## Credits
 
 - **[SamuelitoDaVila](https://github.com/samuelit0davila/fifa-street-pc-port)** — original ReStreet port, Windows installer and launcher.
-- **FyZan Shaik** — this Mac fork, direction, manual gameplay checks and future agent-benchmark goal; development assisted by OpenAI Codex and OpenCode with DeepSeek.
-- **Emran_Ahm3d** — upstream investigations into patch line endings, module registration and game-data paths, FootballCompEng boundaries and resource-compiler compatibility.
-- **[ReXGlue](https://github.com/rexglue/rexglue-sdk)** and **[Xenia](https://github.com/xenia-project/xenia)** — recompilation/runtime foundations; SDL, Vulkan, MoltenVK, LLVM, CMake, Ninja and other dependencies retain their own notices.
+- **[fyzanshaik](https://github.com/fyzanshaik)** — macOS fork, project direction, manual gameplay checks and agent-benchmark goal; development assisted by OpenAI Codex and OpenCode with DeepSeek.
+- **Emran_Ahm3d** — upstream investigations into patch line endings, module registration, game-data paths, FootballCompEng boundaries and resource-compiler compatibility.
+- **[ReXGlue](https://github.com/rexglue/rexglue-sdk)** and **[Xenia](https://github.com/xenia-project/xenia)** — recompilation and runtime foundations.
+- **SDL, Vulkan, MoltenVK, LLVM, CMake, Ninja and other dependencies** — their respective authors and license notices.
 
-Original project-authored code uses the [MIT License](LICENSE), with its existing copyright notice retained. SDK patches and third-party components retain their own licenses; see [third-party notices](licenses/README.md). This repository does not include game assets, original Xbox executables, generated game code or a Mac game binary. FIFA Street content, artwork and trademarks belong to their respective owners. This is an unofficial community project, unaffiliated with EA, Microsoft or Xbox.
+## License and game content
+
+Original project-authored code uses the [MIT License](LICENSE), with the existing
+copyright notice retained. SDK patches and third-party components retain their
+own licenses; see [third-party notices](licenses/README.md).
+
+This repository does not include game assets, original Xbox executables,
+generated game code or a Mac game binary. FIFA Street content, artwork and
+trademarks belong to their respective owners. This is an unofficial community
+project, unaffiliated with EA, Microsoft or Xbox.

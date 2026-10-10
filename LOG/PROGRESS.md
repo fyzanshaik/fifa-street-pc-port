@@ -1,7 +1,7 @@
 # ReStreet macOS — progress, findings and diagnostics
 
 Last updated: 10 October 2026. This is the consolidated engineering record for
-[FyZan Shaik's Mac fork](https://github.com/fyzanshaik/fifa-street-pc-port/tree/main)
+[fyzanshaik's Mac fork](https://github.com/fyzanshaik/fifa-street-pc-port/tree/main)
 of [SamuelitoDaVila's ReStreet](https://github.com/samuelit0davila/fifa-street-pc-port).
 Read this before resuming optimization. The original Windows work and licenses
 are credited in [README.md](../README.md).
@@ -560,6 +560,18 @@ log-viewer behavior, not gameplay or performance improvement. A pathological
 single line can still require holding that line in memory; truncation followed
 by regrowth beyond the old offset between polls is not detectable. Raw worker
 reports and RED/GREEN output remain in ignored local diagnostic storage.
+
+
+### README structure and attribution
+
+Reorganized the README around status, prerequisites/build/play, session logs,
+architecture, controls, measured fixes, future benchmarks and credits. Two
+Mermaid diagrams show the local binary-to-arm64 build pipeline and the runtime
+Vulkan → MoltenVK → Metal graphics path. Attribution now uses `fyzanshaik` as
+requested, while retaining the upstream port and runtime credits. Performance
+figures retain screen/cache and measurement limitations; planned AI evaluations
+remain clearly marked as future work. This is documentation-only work: no build,
+gameplay, runtime setting or keyboard binding changed.
 
 ## Next work
 
