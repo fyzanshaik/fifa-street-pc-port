@@ -641,6 +641,51 @@ output solely from drawable sizes. Agents did not launch or control the real
 game; the final game check was performed by the owner. The owner requested
 publication of this fix on the fork after confirming success.
 
+### Additional macOS credit on title and main menu
+
+The owner asked whether the displayed `PORTED BY` credit could be changed, then
+accepted adding `macOS port: fyzanshaik` alongside the existing upstream credit.
+The displayed line is baked into menu textures, not a runtime string. The
+Windows installer applies a hash-gated texture recipe; the Mac production path
+does not invoke that installer or include the newer Windows Mods loader.
+
+Two OpenCode Build tasks used official `deepseek/deepseek-flash`, verified in
+T3 execution metadata. They added a Mac helper for the two already-credited
+supported screen archives. It edits only the new line's BC3 blocks in a private
+cloned `data1.big`; all unrelated entries remain symlinks to original GameData.
+Source and output hashes are checked before a staged profile is published. The
+original logo and upstream credit blocks remain intact. The line lives in the
+press-start and main-menu textures, avoiding an overlay or gameplay redraw cost.
+
+Review found two real encoding mistakes before delivery: the first decoder
+ignored the XPR2 fetch constant's `k8in16` byte order, producing pink/blue preview
+art instead of the original neutral logo/red banner; it also used BC1's
+three-colour rule where BC3 always has four colour entries. Independent golden
+vectors, the actual fetch header and the SDK's swap/tiling definitions corrected
+both. The initial CoreText renderer was replaced by a deterministic bitmap font
+to make pinned output hashes reproducible across systems. In-place mutation and
+backup/revert code were removed in favour of a private profile. Check/dry-run
+paths perform no mutations, and failed preparation cannot publish half a profile.
+
+Codex visually reviewed the corrected decoded previews and independently ran
+all 63 fixture checks: codec/reference vectors, endian transforms, tiling,
+container validation, preservation, profile refusal/no-mutation cases,
+idempotence and second-target failure safety. The installed bundle and real
+25-binding MnK checks pass. Source menu hashes remain the supported originals;
+the profile hashes match the pinned outputs. A full source/profile comparison
+finds 5,641 differing bytes, zero outside the two texture ranges, with archive
+size unchanged; unrelated profile entries resolve to their original files.
+
+Canonical and installed apps now link to the private credit profile. Original
+GameData, caches, saves, executable modules, runtime settings and Windows paths
+are unchanged. No compilation was needed; packaging used fresh inodes. Agents
+did not launch or control the game. Actual in-game visibility of both added
+lines remains unverified until the owner checks it. The helper currently
+requires the previously credited supported menu archives; plain retail data
+is refused. Reproduction and reversal are documented in the
+[Mac guide](../docs/BUILDING-MACOS.md#optional-macos-menu-credit). Raw asset
+previews and cloned archives remain private, never a repository payload.
+
 ## Next work
 
 - Use the installed app for a manual match, then validate save/reload, longer

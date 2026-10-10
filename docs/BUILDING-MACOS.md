@@ -658,6 +658,40 @@ writable folder for now. Moving these paths to `~/Library/Application Support`
 is a known follow-up that needs runtime (SDK) changes and is deliberately not
 part of this workflow.
 
+## Optional macOS menu credit
+
+`scripts/apply-macos-credits.sh` adds `macOS port: fyzanshaik` beneath the
+upstream credit in the press-start and main-menu textures. It builds a separate
+private GameData profile: `data1.big` is cloned with APFS copy-on-write when
+available (a full file copy otherwise), and unrelated files are symlinked to
+your original extract. Original GameData is never written. No runtime rebuild
+is required.
+
+This helper currently accepts only the exact supported menu archives already
+carrying the upstream installer's credit. Plain retail or other modified menu
+archives are refused. It does not add the Windows credit patch to raw game data.
+
+```sh
+./scripts/apply-macos-credits.sh --check --gamedata "/absolute/original/GameData"
+./scripts/apply-macos-credits.sh --gamedata "/absolute/original/GameData" \
+  --profile "$PWD/private/mac-credits/profile"
+./scripts/package-macos-app.sh --gamedata "$PWD/private/mac-credits/profile"
+./scripts/install-macos.sh --force
+```
+
+Close the game before changing its package or installed copy. Keep both the
+profile and original extract in place: the app links to the profile, which
+links to the remaining original files. `--dry-run` with the build arguments
+validates without creating a profile; `--check` reads only. Rebuilding a profile
+requires the original menu assets, rather than an already patched profile.
+
+To remove the added line, repackage with `--gamedata` pointing to the original
+extract and reinstall with `--force`. The profile can remain private for reuse.
+No original archives, fonts or preview artwork belong in Git. The helper uses
+a deterministic bitmap font and checks source/output hashes; its fixtures run
+with `bash scripts/test-macos-credits.sh`. Decoded previews and byte checks have
+passed; an actual game check of the added credit remains the owner's step.
+
 ## Updating the runtime (targeted rebuild)
 
 `librexruntime.dylib` is the one shared library that can be rebuilt on its own:
