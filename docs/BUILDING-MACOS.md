@@ -181,9 +181,43 @@ them; read [AGENTS.md](../AGENTS.md) for the update/staging pitfalls.
 
 ## Logs and troubleshooting
 
-The build writes configure/build logs under `build/macos/logs`. Terminal play
-prints its exact `.../logs/play/<UTC>/fifastreet.log` path. A Finder launch uses
-the runtime's normal log location beside the executable unless overridden.
+The build writes configure/build logs under `build/macos/logs`. Every launch
+through `scripts/play-macos.sh` writes its own
+`build/macos/logs/play/<UTC>/fifastreet.log`. A `tail -f` command on that path
+stays on that one session.
+
+For a reusable live viewer, start this from the repository in Terminal 1:
+
+```sh
+./scripts/logs-macos.sh
+```
+
+Then launch in Terminal 2:
+
+```sh
+./scripts/play-macos.sh "$HOME/Applications/FIFA Street.app"
+```
+
+The viewer shows the latest session's last 20 lines and follows new lines. It
+waits if no session exists and switches automatically when a newer session
+starts, even if that session's log file has not appeared yet. You can keep it
+open across multiple launches. **Ctrl+C stops only the viewer**, leaving the
+game running. `FIFA_BUILD_ROOT` selects the same alternate build root for both
+commands.
+
+To pin an older session or change the initial history length:
+
+```sh
+./scripts/logs-macos.sh --session 20261010T112440Z --lines 50
+```
+
+This viewer follows normal-play sessions created by `play-macos.sh`. A Finder
+double-click writes the runtime's default logs inside
+`FIFA Street.app/Contents/MacOS/logs/`; it does not create a normal-play session
+in the repository. Build logs and bounded performance-check traces are also
+separate from normal-play logs. Driver messages written directly to stdout or
+stderr (such as MoltenVK notices) remain in the launch Terminal; this viewer
+streams the runtime's `fifastreet.log`.
 
 - Compiler/licensing failure: install/select the required Xcode tools; review
   and accept the license yourself using `sudo xcodebuild -license` if needed.

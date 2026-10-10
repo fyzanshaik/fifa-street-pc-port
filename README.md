@@ -44,6 +44,22 @@ To install the built app for Finder access without copying game assets:
 This installs into `~/Applications`; an existing app is replaced only with
 `--force`. The normal play command has **no time limit**. You can also open the produced `.app` in Finder. Keep the original `GameData` folder in place: the app links to it instead of copying it. Follow the [Mac setup guide](docs/BUILDING-MACOS.md) for installation, toolchain troubleshooting, rebuilding and logs.
 
+## Watch session logs
+
+From the repository, start this in a separate Terminal before or after launching
+with `scripts/play-macos.sh`:
+
+```sh
+./scripts/logs-macos.sh
+```
+
+The watcher shows the latest session and switches automatically on the next
+launch. With no sessions yet, it waits. **Ctrl+C stops the log viewer only.**
+For an installed app, launch in another Terminal with
+`./scripts/play-macos.sh "$HOME/Applications/FIFA Street.app"`. The
+[Mac guide](docs/BUILDING-MACOS.md#logs-and-troubleshooting) explains session
+selection and Finder log locations.
+
 ## Basic keyboard controls
 
 The shipped profile keeps **arrows for movement** and **Space to confirm/pass**. Xbox button prompts remain in the game.

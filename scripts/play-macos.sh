@@ -57,8 +57,10 @@ if [[ -f "${APP_CONFIG}" ]] && ! grep -q 'vulkan_macos_unpaced_present' "${APP_C
 fi
 if pgrep -x fifastreet >/dev/null; then echo "A game instance is already running." >&2; exit 1; fi
 LOGS="${BUILD_ROOT}/logs/play/$(date -u +%Y%m%dT%H%M%SZ)"
+SESSION_ID="${LOGS##*/}"
 mkdir -p "${LOGS}"
 echo "Logs: ${LOGS}/fifastreet.log"
+echo "Follow this session: scripts/logs-macos.sh --session ${SESSION_ID}"
 echo "No time limit. Arrows = movement; Space = select/pass; Enter = Start."
 cd "${MACOS_DIR}"
 exec env -u RESTREET_PERF_DIAG -u RESTREET_INPUT_DIAG -u RESTREET_CAPTURE_DIR \

@@ -524,6 +524,43 @@ launcher/direct-play/scaling changes serve customization and Windows usability.
 Preserve this working baseline and measure a separate readback candidate before
 changing the Mac production defaults.
 
+### Reusable normal-play log viewer
+
+The owner requested a single command for logs before starting the next game.
+The original printed `tail -f` path was session-specific: following the previous
+file would not follow a new launch. `scripts/logs-macos.sh` follows the latest
+normal-play UTC session, waits when no session/log exists and switches when the
+next session directory appears. `--session ID` pins a session and `--lines N`
+sets the initial history. Ctrl+C ends only the watcher. It reads files and has
+no game-process control or log-file mutations.
+
+The play command now prints the exact pinned-session viewer command. The
+README and Mac guide explain using two Terminals: viewer first, then normal
+play. The viewer follows `fifastreet.log`; direct driver stdout/stderr remains
+in the launch Terminal. Finder logs live inside the bundle and do not create
+these normal-play session folders.
+
+The initial suite passed 42 behavioral checks on fake logs/processes, covering
+late session creation, appends, switching before the next file exists, pinned
+sessions, truncation/replacement, argument validation and stop isolation. Review
+then reproduced a split-line defect: an initial `first=le` plus a later `ft\n`
+was displayed as two lines. Large-log attachment also read the entire file for
+a 20-line tail, and disappearance between replacement stat/open could stop the
+watcher. New regression fixtures reproduced five failures before the fixes
+(51 passing / 5 failing checks). Partial-byte buffering, chunked tail/append
+reads and retry on disappearance resolved them. The final suite passes all
+57 checks, including split UTF-8 writes and a synthetic 400,000-line log;
+launcher argument checks pass 7/7. Codex independently reran both suites and
+the original split-line reproducer after reviewing the implementation.
+
+OpenCode Build used the official `deepseek/deepseek-flash` model, verified from
+session metadata; Codex owns this documentation and final Git review. No real
+game was launched or rebuilt for this CLI-only addition. These fixtures prove
+log-viewer behavior, not gameplay or performance improvement. A pathological
+single line can still require holding that line in memory; truncation followed
+by regrowth beyond the old offset between polls is not detectable. Raw worker
+reports and RED/GREEN output remain in ignored local diagnostic storage.
+
 ## Next work
 
 - Use the installed app for a manual match, then validate save/reload, longer

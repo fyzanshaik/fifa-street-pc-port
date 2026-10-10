@@ -66,6 +66,10 @@ on the user's behalf as part of setup.
 ./scripts/play-macos.sh
 ```
 
+Use `./scripts/logs-macos.sh` in another Terminal to watch normal-play sessions.
+It may start before the game and follows each new session automatically; Ctrl+C
+stops the viewer only. Finder launches use separate logs inside the bundle.
+
 Normal play is unbounded. Diagnostic runs are explicitly bounded and must say
 when the game will close. **Do not automate the game window or inject game
 input under the current user instruction.** Human checks drive menus and
@@ -128,6 +132,7 @@ bash scripts/test-macos-guest-clock.sh
 bash scripts/test-macos-runtime-clock.sh build/macos/out
 bash scripts/test-macos-keyboard-profile.sh build/macos/out
 bash scripts/test-macos-install.sh
+bash scripts/test-macos-logs.sh
 bash scripts/test-macos-host-defaults.sh
 bash scripts/test-macos-runtime-config.sh
 bash scripts/test-macos-shader-storage.sh build/macos/out
