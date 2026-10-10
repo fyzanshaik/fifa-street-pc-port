@@ -1,0 +1,361 @@
+diff --git a/include/rex/input/input_diagnostics.h b/include/rex/input/input_diagnostics.h
+new file mode 100644
+index 0000000..7e66ab6
+--- /dev/null
++++ b/include/rex/input/input_diagnostics.h
+@@ -0,0 +1,244 @@
++/**
++ * @file        rex/input/input_diagnostics.h
++ * @brief       Opt-in, aggregated instrumentation for the keyboard-to-guest
++ *              input chain.
++ *
++ * The macOS MnK path has several gates between a physical key and the guest
++ * reading a controller button (SDL event delivery, window keyboard focus, the
++ * MnK driver's mnk_mode/has_focus/is_active gates, the bind parser, device
++ * assignment to guest user 0). When a key press has no effect it is not obvious
++ * which gate dropped it, and the normal logs cannot say because the guest input
++ * entry points only trace.
++ *
++ * This header records a small, coherent summary of every stage and emits one
++ * aggregated line at most once per second. It is inert - a single relaxed atomic
++ * load - unless RESTREET_INPUT_DIAG is set to a non-empty value other than "0".
++ * It never logs a stream of individual keystrokes: the counters and the last
++ * mapped button mask are what is reported, and only from the game's own window.
++ *
++ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
++ *              All rights reserved.
++ *
++ * @license     BSD 3-Clause License
++ *              See LICENSE file in the project root for full license text.
++ */
++#pragma once
++
++#include <atomic>
++#include <chrono>
++#include <cstdint>
++#include <cstdlib>
++#include <string_view>
++
++#include <rex/logging.h>
++
++namespace rex::input::diag {
++
++/// True only when the operator opted in via RESTREET_INPUT_DIAG. Read once.
++inline bool Enabled() {
++  static const bool enabled = [] {
++    const char* value = std::getenv("RESTREET_INPUT_DIAG");
++    return value != nullptr && *value != '\0' && std::string_view(value) != "0";
++  }();
++  return enabled;
++}
++
++/// Coherent summary of the whole chain. Every field is an independent atomic;
++/// the 1 Hz aggregation may therefore straddle a boundary, which is fine for a
++/// coarse "which stage is alive" report.
++struct Counters {
++  // window_sdl.cpp - the SDL event as delivered to the window.
++  std::atomic<uint64_t> sdl_down{0};
++  std::atomic<uint64_t> sdl_down_mapped{0};
++  std::atomic<uint64_t> sdl_down_unmapped{0};
++  std::atomic<uint64_t> sdl_up{0};
++  std::atomic<uint32_t> last_scancode{0};
++  std::atomic<uint32_t> last_vk{0};
++  std::atomic<uint32_t> last_focus{0};
++
++  // mnk_input_driver.cpp - OnKeyDown gate, and GetDeviceState gate.
++  std::atomic<uint64_t> mnk_down_seen{0};
++  std::atomic<uint64_t> mnk_down_disabled{0};
++  std::atomic<uint64_t> mnk_down_unfocused{0};
++  std::atomic<uint64_t> mnk_get{0};
++  std::atomic<uint64_t> mnk_gate_inactive{0};
++  std::atomic<uint64_t> mnk_gate_unfocused{0};
++  std::atomic<uint64_t> mnk_evaluated{0};
++  std::atomic<uint32_t> mnk_last_buttons{0};
++  std::atomic<uint64_t> mnk_a_hits{0};
++
++  // input_system.cpp - what the guest actually read for user 0.
++  std::atomic<uint64_t> guest_u0{0};
++  std::atomic<uint64_t> guest_u0_buttons{0};
++  std::atomic<uint64_t> guest_u0_a{0};
++  std::atomic<uint32_t> guest_last_buttons{0};
++  std::atomic<uint64_t> guest_other{0};
++  std::atomic<uint64_t> guest_ks_calls{0};
++  std::atomic<uint64_t> guest_ks_ok{0};
++
++  std::atomic<int64_t> last_flush_ms{-1000};
++};
++
++inline Counters& C() {
++  static Counters counters;
++  return counters;
++}
++
++inline int64_t NowMs() {
++  using clock = std::chrono::steady_clock;
++  static const clock::time_point start = clock::now();
++  return std::chrono::duration_cast<std::chrono::milliseconds>(clock::now() - start).count();
++}
++
++/// Emits at most one aggregated line per second. Cheap enough to call from the
++/// per-frame guest path: one relaxed load when disabled, one load plus an
++/// occasional compare-exchange when enabled.
++inline void MaybeFlush() {
++  if (!Enabled()) {
++    return;
++  }
++  Counters& c = C();
++  const int64_t now = NowMs();
++  int64_t last = c.last_flush_ms.load(std::memory_order_relaxed);
++  if (now - last < 1000) {
++    return;
++  }
++  if (!c.last_flush_ms.compare_exchange_strong(last, now, std::memory_order_relaxed)) {
++    return;  // another thread is already emitting this second
++  }
++  REXLOG_INFO(
++      "[input-diag] sdl down={} mapped={} unmapped={} up={} last_scan={} last_vk=0x{:X} "
++      "focus={} | mnk down_seen={} down_disabled={} down_unfocused={} get={} gate_inactive={} "
++      "gate_unfocused={} evaluated={} last_buttons=0x{:X} a_hits={} | guest u0={} u0_buttons={} "
++      "u0_a={} last_buttons=0x{:X} other={} ks_calls={} ks_ok={}",
++      c.sdl_down.load(std::memory_order_relaxed),
++      c.sdl_down_mapped.load(std::memory_order_relaxed),
++      c.sdl_down_unmapped.load(std::memory_order_relaxed),
++      c.sdl_up.load(std::memory_order_relaxed), c.last_scancode.load(std::memory_order_relaxed),
++      c.last_vk.load(std::memory_order_relaxed), c.last_focus.load(std::memory_order_relaxed),
++      c.mnk_down_seen.load(std::memory_order_relaxed),
++      c.mnk_down_disabled.load(std::memory_order_relaxed),
++      c.mnk_down_unfocused.load(std::memory_order_relaxed),
++      c.mnk_get.load(std::memory_order_relaxed),
++      c.mnk_gate_inactive.load(std::memory_order_relaxed),
++      c.mnk_gate_unfocused.load(std::memory_order_relaxed),
++      c.mnk_evaluated.load(std::memory_order_relaxed),
++      c.mnk_last_buttons.load(std::memory_order_relaxed),
++      c.mnk_a_hits.load(std::memory_order_relaxed), c.guest_u0.load(std::memory_order_relaxed),
++      c.guest_u0_buttons.load(std::memory_order_relaxed),
++      c.guest_u0_a.load(std::memory_order_relaxed),
++      c.guest_last_buttons.load(std::memory_order_relaxed),
++      c.guest_other.load(std::memory_order_relaxed),
++      c.guest_ks_calls.load(std::memory_order_relaxed),
++      c.guest_ks_ok.load(std::memory_order_relaxed));
++}
++
++/// window_sdl.cpp: one SDL key event reached the window. `vk` is 0 (kNone) when
++/// the scancode had no VirtualKey translation; `focused` is the SDL keyboard
++/// focus at the moment the event was handled.
++inline void ObserveSdlKey(bool down, uint32_t scancode, uint32_t vk, bool focused) {
++  if (!Enabled()) {
++    return;
++  }
++  Counters& c = C();
++  if (down) {
++    c.sdl_down.fetch_add(1, std::memory_order_relaxed);
++    if (vk != 0) {
++      c.sdl_down_mapped.fetch_add(1, std::memory_order_relaxed);
++    } else {
++      c.sdl_down_unmapped.fetch_add(1, std::memory_order_relaxed);
++    }
++  } else {
++    c.sdl_up.fetch_add(1, std::memory_order_relaxed);
++  }
++  c.last_scancode.store(scancode, std::memory_order_relaxed);
++  c.last_vk.store(vk, std::memory_order_relaxed);
++  c.last_focus.store(focused ? 1u : 0u, std::memory_order_relaxed);
++  MaybeFlush();
++}
++
++/// mnk_input_driver.cpp OnKeyDown: whether the key was accepted, or which gate
++/// rejected it.
++inline void ObserveMnkKeyDown(bool driver_enabled, bool driver_focused) {
++  if (!Enabled()) {
++    return;
++  }
++  Counters& c = C();
++  if (!driver_enabled) {
++    c.mnk_down_disabled.fetch_add(1, std::memory_order_relaxed);
++  } else if (!driver_focused) {
++    c.mnk_down_unfocused.fetch_add(1, std::memory_order_relaxed);
++  } else {
++    c.mnk_down_seen.fetch_add(1, std::memory_order_relaxed);
++  }
++  MaybeFlush();
++}
++
++/// mnk_input_driver.cpp GetDeviceState: which gate decided the returned state,
++/// and the button mask the bind parser produced on the evaluated path.
++inline void ObserveMnkState(bool active, bool focused, uint32_t buttons) {
++  if (!Enabled()) {
++    return;
++  }
++  Counters& c = C();
++  c.mnk_get.fetch_add(1, std::memory_order_relaxed);
++  if (!active) {
++    c.mnk_gate_inactive.fetch_add(1, std::memory_order_relaxed);
++  } else if (!focused) {
++    c.mnk_gate_unfocused.fetch_add(1, std::memory_order_relaxed);
++  } else {
++    c.mnk_evaluated.fetch_add(1, std::memory_order_relaxed);
++  }
++  c.mnk_last_buttons.store(buttons, std::memory_order_relaxed);
++  if (buttons & 0x1000u) {  // X_INPUT_GAMEPAD_A
++    c.mnk_a_hits.fetch_add(1, std::memory_order_relaxed);
++  }
++  MaybeFlush();
++}
++
++/// input_system.cpp GetState: what the guest read for guest user 0. Non-zero
++/// user indices are counted separately - the MnK device is synthetic and only
++/// feeds user 0, so a guest polling user 1..3 would see nothing.
++inline void ObserveGuestState(uint32_t user_index, bool connected, uint32_t buttons) {
++  if (!Enabled()) {
++    return;
++  }
++  Counters& c = C();
++  if (user_index != 0) {
++    c.guest_other.fetch_add(1, std::memory_order_relaxed);
++    MaybeFlush();
++    return;
++  }
++  c.guest_u0.fetch_add(1, std::memory_order_relaxed);
++  if (connected) {
++    c.guest_last_buttons.store(buttons, std::memory_order_relaxed);
++    if (buttons != 0) {
++      c.guest_u0_buttons.fetch_add(1, std::memory_order_relaxed);
++    }
++    if (buttons & 0x1000u) {  // X_INPUT_GAMEPAD_A
++      c.guest_u0_a.fetch_add(1, std::memory_order_relaxed);
++    }
++  }
++  MaybeFlush();
++}
++
++/// input_system.cpp GetKeystroke: whether the guest is polling keystrokes at
++/// all (Poll), and whether a driver ever produced one (Produced) - the MnK
++/// driver's keystroke queue is never filled today.
++inline void ObserveGuestKeystrokePoll(uint32_t user_index) {
++  if (!Enabled() || user_index != 0) {
++    return;
++  }
++  C().guest_ks_calls.fetch_add(1, std::memory_order_relaxed);
++  MaybeFlush();
++}
++
++inline void ObserveGuestKeystrokeProduced(uint32_t user_index) {
++  if (!Enabled() || user_index != 0) {
++    return;
++  }
++  C().guest_ks_ok.fetch_add(1, std::memory_order_relaxed);
++  MaybeFlush();
++}
++
++}  // namespace rex::input::diag
+diff --git a/src/input/input_system.cpp b/src/input/input_system.cpp
+index 7867984..f453ef0 100644
+--- a/src/input/input_system.cpp
++++ b/src/input/input_system.cpp
+@@ -17,6 +17,7 @@
+ #include <rex/input/device_assignment.h>
+ #include <rex/input/flags.h>
+ #include <rex/input/guide_capture.h>
++#include <rex/input/input_diagnostics.h>
+ #include <rex/input/input_driver.h>
+ #include <rex/input/input_system.h>
+ #include <rex/input/mnk/mnk_input_driver.h>
+@@ -262,6 +263,7 @@ X_RESULT InputSystem::GetState(uint32_t user_index, X_INPUT_STATE* out_state) {
+   }
+ 
+   if (!any) {
++    rex::input::diag::ObserveGuestState(user_index, /*connected=*/false, 0);
+     return X_ERROR_DEVICE_NOT_CONNECTED;
+   }
+   if (user_index == 0) {
+@@ -285,6 +287,8 @@ X_RESULT InputSystem::GetState(uint32_t user_index, X_INPUT_STATE* out_state) {
+       g_guide_prev_buttons = buttons;  // a button held while opening is not a press
+     }
+   }
++  rex::input::diag::ObserveGuestState(
++      user_index, /*connected=*/true, uint32_t(static_cast<uint16_t>(merged.gamepad.buttons)));
+   if (out_state) {
+     *out_state = merged;
+   }
+@@ -337,6 +341,7 @@ X_RESULT InputSystem::GetKeystroke(uint32_t user_index, uint32_t flags,
+                                    X_INPUT_KEYSTROKE* out_keystroke) {
+   SCOPE_profile_cpu_f("hid");
+   std::lock_guard lock(devices_mutex_);
++  rex::input::diag::ObserveGuestKeystrokePoll(user_index);
+   if (!assignment_) {
+     return X_ERROR_DEVICE_NOT_CONNECTED;
+   }
+@@ -358,6 +363,7 @@ X_RESULT InputSystem::GetKeystroke(uint32_t user_index, uint32_t flags,
+     X_RESULT result = driver->GetDeviceKeystroke(id, flags, out_keystroke);
+     if (result == X_ERROR_SUCCESS) {
+       out_keystroke->user_index = static_cast<uint8_t>(user_index);
++      rex::input::diag::ObserveGuestKeystrokeProduced(user_index);
+       return result;
+     }
+     if (result != X_ERROR_DEVICE_NOT_CONNECTED) {
+diff --git a/src/input/mnk/mnk_input_driver.cpp b/src/input/mnk/mnk_input_driver.cpp
+index 3f9422d..6965834 100644
+--- a/src/input/mnk/mnk_input_driver.cpp
++++ b/src/input/mnk/mnk_input_driver.cpp
+@@ -12,6 +12,7 @@
+ 
+ #include <rex/cvar.h>
+ #include <rex/input/input.h>
++#include <rex/input/input_diagnostics.h>
+ #include <rex/logging.h>
+ #include <rex/ui/keybinds.h>
+ #include <rex/ui/virtual_key.h>
+@@ -265,6 +266,7 @@ X_RESULT MnkInputDriver::GetDeviceState(DeviceId id, X_INPUT_STATE* out_state) {
+                           has_focus_ && is_active());
+ 
+   if (!is_active() || !has_focus_) {
++    rex::input::diag::ObserveMnkState(is_active(), has_focus_, 0);
+     if (out_state) {
+       std::memset(out_state, 0, sizeof(*out_state));
+       out_state->packet_number = packet_number_;
+@@ -343,6 +345,8 @@ X_RESULT MnkInputDriver::GetDeviceState(DeviceId id, X_INPUT_STATE* out_state) {
+   mouse_dx_ = 0.0f;
+   mouse_dy_ = 0.0f;
+ 
++  rex::input::diag::ObserveMnkState(/*active=*/true, /*focused=*/true, buttons);
++
+   auto clamp16 = [](int32_t v) -> int16_t {
+     return static_cast<int16_t>(std::clamp(v, (int32_t)INT16_MIN, (int32_t)INT16_MAX));
+   };
+@@ -481,7 +485,10 @@ void MnkInputDriver::SetKeyState(uint16_t vk, bool down) {
+ }
+ 
+ void MnkInputDriver::OnKeyDown(rex::ui::KeyEvent& e) {
+-  if (!IsEnabled() || !has_focus_)
++  const bool driver_enabled = IsEnabled();
++  const bool driver_focused = has_focus_;
++  rex::input::diag::ObserveMnkKeyDown(driver_enabled, driver_focused);
++  if (!driver_enabled || !driver_focused)
+     return;
+   std::lock_guard lock(state_mutex_);
+   uint16_t vk = static_cast<uint16_t>(e.virtual_key());
+diff --git a/src/ui/window_sdl.cpp b/src/ui/window_sdl.cpp
+index 29b1e8b..5b595ee 100644
+--- a/src/ui/window_sdl.cpp
++++ b/src/ui/window_sdl.cpp
+@@ -23,6 +23,7 @@
+ 
+ #include <rex/cvar.h>
+ #include <rex/graphics/video_mode_util.h>
++#include <rex/input/input_diagnostics.h>
+ #include <rex/logging.h>
+ #include <rex/platform.h>
+ #include <rex/ui/flags.h>
+@@ -558,6 +559,12 @@ void WindowSDL::HandleDropEvent(SDL_Event& event) {
+ 
+ void WindowSDL::HandleKeyEvent(SDL_Event& event) {
+   VirtualKey virtual_key = TranslateSDLScancode(event.key.scancode);
++  if (rex::input::diag::Enabled()) {
++    const bool focused =
++        sdl_window_ && (SDL_GetWindowFlags(sdl_window_) & SDL_WINDOW_INPUT_FOCUS) != 0;
++    rex::input::diag::ObserveSdlKey(event.type == SDL_EVENT_KEY_DOWN, uint32_t(event.key.scancode),
++                                    uint32_t(virtual_key), focused);
++  }
+   if (virtual_key == VirtualKey::kNone) {
+     return;
+   }

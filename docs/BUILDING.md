@@ -2,6 +2,8 @@
 
 The usual player workflow uses the release installer and a personal ISO. These instructions describe development and packaging. They do not include game data or generated guest code.
 
+Building on macOS is a separate, experimental development workflow; see [BUILDING-MACOS.md](BUILDING-MACOS.md). The instructions below are the Windows x64 path.
+
 ## Developer prerequisites
 
 For a development build, follow **Source build walkthrough** below. This builds

@@ -1,0 +1,64 @@
+//=============================================================================
+// ReXGlue Generated - {{ project }} Function Registration
+//=============================================================================
+//
+// macOS-only template override. scripts/build-macos.sh stages this directory
+// into the workspace and points the manifest's per-binary "template_dir" at it;
+// the Windows build never sets template_dir, so it keeps using the embedded
+// template byte-for-byte.
+//
+// The embedded template emits every registrar->SetFunction() call in a single
+// ReXModule_Register function. For fifadllzf that is ~159k statements in one
+// function, which is pathological for the clang backend even at -O0. Here the
+// calls are split into bounded chunk helpers (512 calls each) that the exported
+// entry point calls in source order, so the registered address -> symbol
+// sequence is identical to the unchunked output.
+
+#include "{{ project }}_init.h"
+#include <rex/system/function_dispatcher.h>
+
+{% if is_dll %}
+#ifdef _WIN32
+#define REX_MODULE_EXPORT __declspec(dllexport)
+#else
+#define REX_MODULE_EXPORT __attribute__((visibility("default")))
+#endif
+{% endif %}
+
+{% set count = 0 %}
+{% set chunk = 0 %}
+{% for fn in functions %}{% if not fn.below_code_base or fn.is_import %}{% if count % 512 == 0 %}{% if count > 0 %}
+}
+
+{% endif %}
+static void ReXModule_Register_Chunk{{ chunk }}(rex::runtime::IModuleRegistrar* registrar) {
+{% set chunk = chunk + 1 %}
+{% endif %}
+  registrar->SetFunction({{ fn.address }}, {{ fn.name }});
+{% set count = count + 1 %}
+{% endif %}{% endfor %}
+{% if count > 0 %}
+}
+{% endif %}
+
+{% if is_dll %}
+extern "C" REX_MODULE_EXPORT
+void ReXModule_Register(rex::runtime::IModuleRegistrar* registrar) {
+{% else %}
+void {{ project }}_RegisterFunctions(rex::runtime::IModuleRegistrar* registrar) {
+{% endif %}
+{% for i in range(chunk) %}
+  ReXModule_Register_Chunk{{ i }}(registrar);
+{% endfor %}{% if chunk == 0 %}
+  (void)registrar;
+{% endif %}
+}
+
+{% if is_dll %}
+// The runtime uses this baked layout for the dispatch table. It must match the
+// constants used by this module's REX_LOOKUP_FUNC macro.
+extern "C" REX_MODULE_EXPORT
+const rex::PPCImageInfo* ReXModule_GetImageInfo() {
+  return &PPCImageConfig;
+}
+{% endif %}

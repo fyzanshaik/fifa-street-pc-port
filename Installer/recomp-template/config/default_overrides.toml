@@ -1,0 +1,31 @@
+# FIFA Street entrypoint (default.xex) codegen overrides.
+#
+# Host-concurrency correction for sub_820509A8: the guest "Start" routine spawns
+# its worker before it constructs the two CEvent objects the worker signals on
+# entry. The guest itself does not synchronise that ordering (Xbox 360 is
+# multicore, so the creating thread is not guaranteed to win); the host
+# scheduler just exposes the race far more often, and the worker can run inside
+# XThread::Create() and read the still-NULL +0x4C / +0x50 pointers (guest read of
+# 0x4). These two hooks hoist both constructions ahead of the spawn; the guest
+# instructions that follow the spawn are unchanged and still drive the wait.
+# If the object is not in the expected pre-spawn state, or the guest
+# allocator/constructor fails, the hoist terminates with a fatal diagnostic
+# instead of continuing into the unsafe spawn. Implemented in
+# src/guest_start_events.cpp (+ src/guest_start_events_core.h). See
+# docs/BUILDING-MACOS.md and build/macos/logs/startup-order-fix.summary.txt.
+
+# Immediately before the spawn argument setup (guest 0x82050A00): construct both
+# events and store them at this+0x4C / this+0x50.
+[[midasm_hook]]
+address = 0x82050A00
+name = "ReStreetHoistStartEvents"
+registers = ["r31"]
+
+# At the original construction site (guest 0x82050A7C): if the events were
+# hoisted, skip the now-redundant constructions so they are not overwritten and
+# leaked. The jump target is the guest instruction just before the wait call.
+[[midasm_hook]]
+address = 0x82050A7C
+name = "ReStreetStartEventsHoisted"
+registers = ["r31"]
+jump_address_on_true = 0x82050ABC

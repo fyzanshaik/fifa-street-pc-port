@@ -1,6 +1,8 @@
 # Validation and known limitations
 
-Last updated: **8 October 2026**, for **ReStreet v1.0** (offline only). This page separates what was tested from what was not.
+Last updated: **10 October 2026** for Mac support. The Windows section retains
+the original **8 October 2026 / ReStreet v1.0** (offline-only) validation record.
+This page separates what was tested from what was not.
 
 ## What was tested for v1.0
 
@@ -41,24 +43,29 @@ The installer checks its payload against the hashes in its own manifest before i
 
 Output resolution and internal rendering scale are independent. Internal resolution is a whole-number multiple of the game's 1280x720 base: 1x is 1280x720, 2x is 2560x1440, 3x is 3840x2160 and 4x is 5120x2880. Higher settings are available for testing and are not a performance guarantee.
 
-## Not tested
+## macOS source-build preview — 10 October 2026
 
-- Any GPU other than the AMD Radeon RX 9070 XT (an RX 6700 was used on earlier releases). NVIDIA and Intel graphics have not been tested.
-- Weak or old PCs. The system requirements in the README are estimates.
-- The Performance profile on a PC where the GPU is the limit.
-- Other ISO regions or revisions: the installer accepts only builds that match the three verified module hashes.
-- Long World Tour careers, all venues, all controller types and long play sessions.
-- Windows 10.
+Apple Silicon is the tested target. The owner reports good gameplay, and the
+latest normal-clock main-menu comparison reports improved music and movement.
+Further performance work is paused to finish install/play reliability and
+controls. This is not a prebuilt Mac release or a claim of sustained 60 FPS.
 
-## Known limitations
+| Check | Current evidence |
+|---|---|
+| Native arm64 build, `.app`, dependencies and guest dylib loading | Passed on the test MacBook |
+| Manual progress to menu and playable matches | Reported by owner |
+| Latest normal-clock main-menu music / movement | Improved; bounded run exited cleanly |
+| Late new displayed outputs in that menu check | About 24.6/s; not simulation FPS |
+| Keyboard profile | Real MnK fixture checks 25 bindings, releases and simultaneous movement+sprint+pass |
+| Guest clock | Rate defect reproduced before fix; anchored conversion/concurrency/TSAN and public time controls pass |
+| Idle waits, dormant overlays and shader-cache reload | Focused regressions pass; manual comparisons show improvements |
+| Acquire/drawable recovery | Classifier/sync tests and build pass; all live resize/background cases remain unverified |
+| Save/reload, every mode, multiple controllers, long sessions | Not fully verified |
+| Intel Mac | Untested |
+| Agentic model matches / deterministic evaluations | Future work; local control/capture tools are experimental |
 
-- No universal hardware, driver or frame-rate guarantee. 3x/4x internal rendering and 4K output are not guaranteed 60 FPS modes.
-- No online play in v1.0.
-- The window title of the game itself still reads "FIFA Street PC"; the launcher and installer use the ReStreet name.
-- The exit prompt only opens with the START + B (START + Circle) shortcut, not from the main menu.
-- The installer expands its details panel by 180 px, which does not fit on screens 768 px high or less.
-- Free-space requirements depend on extraction and temporary files.
-
-## Development method
-
-SamuelitoDaVila directed and tested the project with AI assistance from ChatGPT, OpenAI Codex and Anthropic's Claude (Claude Code). The statements above separate what was actually tested from what still needs broader coverage.
+Use [BUILDING-MACOS.md](BUILDING-MACOS.md) for installation and
+[CONTROLS-MACOS.md](CONTROLS-MACOS.md) for keys. The single consolidated
+[LOG/PROGRESS.md](../LOG/PROGRESS.md) contains the historical black-screen,
+severe-menu/audio reports, measurements, successful fixes, failed comparisons
+and operating lessons. Original game files and generated guest code stay local.

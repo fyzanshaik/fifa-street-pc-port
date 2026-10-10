@@ -1,0 +1,414 @@
+diff --git a/include/rex/ui/vulkan/presenter.h b/include/rex/ui/vulkan/presenter.h
+index 4991869..eef9bd2 100644
+--- a/include/rex/ui/vulkan/presenter.h
++++ b/include/rex/ui/vulkan/presenter.h
+@@ -285,6 +285,14 @@ class VulkanPresenter final : public Presenter {
+       VkCommandPool draw_command_pool() const { return draw_command_pool_; }
+       VkCommandBuffer draw_command_buffer() const { return draw_command_buffer_; }
+ 
++      // Replaces the acquire semaphore and fence after a macOS reconnect, once
++      // all in-flight references to them have ceased. See
++      // swapchain_acquire_sync_recovery.h.
++      void set_acquire_sync(VkSemaphore acquire_semaphore, VkFence acquire_fence) {
++        acquire_semaphore_ = acquire_semaphore;
++        acquire_fence_ = acquire_fence;
++      }
++
+      private:
+       explicit Submission(const VulkanDevice* const vulkan_device)
+           : vulkan_device_(vulkan_device) {}
+@@ -362,6 +370,11 @@ class VulkanPresenter final : public Presenter {
+     // May be called from the destructor of the presenter.
+     void DestroySwapchainAndVulkanSurface();
+ 
++    // Replaces the acquire semaphore and fence of the submission slots noted by
++    // acquire_sync_recovery_pending_. Must be called only after all in-flight
++    // references to them have ceased (see swapchain_acquire_sync_recovery.h).
++    void RecoverAcquireSyncAfterRetirement();
++
+     // Connection-indepedent.
+ 
+     const VulkanDevice* vulkan_device;
+@@ -369,6 +382,13 @@ class VulkanPresenter final : public Presenter {
+     std::array<std::unique_ptr<PaintContext::Submission>, kSubmissionCount> submissions;
+     VulkanSubmissionTracker submission_tracker;
+ 
++    // macOS only: bitmask of submission slots whose acquire semaphore MoltenVK
++    // may have left signaled when it requested a reconnect, and slots whose
++    // replacement failed (those must not be reused). Not touched on other
++    // platforms.
++    uint32_t acquire_sync_recovery_pending_ = 0;
++    uint32_t acquire_sync_recovery_failed_mask_ = 0;
++
+     std::array<GuestOutputPaintPipeline, size_t(GuestOutputPaintEffect::kCount)>
+         guest_output_paint_pipelines;
+ 
+diff --git a/src/ui/vulkan/swapchain_acquire_recovery.h b/src/ui/vulkan/swapchain_acquire_recovery.h
+new file mode 100644
+index 0000000..05856cb
+--- /dev/null
++++ b/src/ui/vulkan/swapchain_acquire_recovery.h
+@@ -0,0 +1,72 @@
++/**
++ ******************************************************************************
++ * ReStreet : macOS MoltenVK swapchain acquire recovery classification
++ ******************************************************************************
++ *
++ * Focused, dependency-light classification of vkAcquireNextImageKHR results so
++ * the presenter's recovery decision is one testable function rather than a
++ * branch buried at the end of PaintAndPresentImpl.
++ *
++ * MoltenVK (macOS) reports VK_ERROR_OUT_OF_POOL_MEMORY from
++ * MVKPresentableSwapchainImage::getCAMetalDrawable() when it cannot obtain a
++ * CAMetalDrawable after retrying the swapchain image count. The source comment
++ * there says the error is deliberately set to trigger the swapchain to be
++ * re-established, and acquireAndSignalWhenAvailable() returns that sticky
++ * configuration result to vkAcquireNextImageKHR. The presenter previously fell
++ * through to its default branch (kNotPresented), so the requested recreation
++ * never happened and the image the acquire had already handed out stayed
++ * acquired.
++ *
++ * This closes that source gap only. Whether the gap is what produces the
++ * observed macOS black screen is NOT established: the runtime wedge has not been
++ * reproduced against this change, so the black-screen relation remains unproven.
++ *
++ * On Vulkan drivers other than MoltenVK, VK_ERROR_OUT_OF_POOL_MEMORY is not a
++ * documented vkAcquireNextImageKHR result, so it stays an unclassified failure
++ * there; only the macOS/MoltenVK path treats it as a reconnect request.
++ */
++
++#pragma once
++
++#include <vulkan/vulkan_core.h>
++
++namespace rex::ui::vulkan {
++
++// What the presenter should do after vkAcquireNextImageKHR.
++enum class SwapchainAcquireOutcome {
++  kProceed,     // An image was acquired; continue drawing and submitting.
++  kRetry,       // No image this iteration; drop the frame, keep the swapchain.
++  kReconnect,   // Drop the frame and mark the connection outdated so the
++                // presenter recreates the swapchain.
++  kDeviceLost,  // Report host GPU loss.
++  kFailed,      // Unclassified failure; drop the frame and log.
++};
++
++// `moltenvk_present` is true only on the macOS MoltenVK runtime. It is an
++// explicit parameter rather than a compile-time platform check so the
++// platform-specific pool-memory mapping can be exercised directly by
++// scripts/drawable_recovery_test.cpp.
++inline SwapchainAcquireOutcome ClassifySwapchainAcquireResult(VkResult result,
++                                                              bool moltenvk_present) {
++  switch (result) {
++    case VK_SUCCESS:
++    case VK_SUBOPTIMAL_KHR:
++      return SwapchainAcquireOutcome::kProceed;
++    case VK_TIMEOUT:
++    case VK_NOT_READY:
++      return SwapchainAcquireOutcome::kRetry;
++    case VK_ERROR_DEVICE_LOST:
++      return SwapchainAcquireOutcome::kDeviceLost;
++    case VK_ERROR_OUT_OF_DATE_KHR:
++    case VK_ERROR_SURFACE_LOST_KHR:
++    case VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT:
++      return SwapchainAcquireOutcome::kReconnect;
++    case VK_ERROR_OUT_OF_POOL_MEMORY:
++      return moltenvk_present ? SwapchainAcquireOutcome::kReconnect
++                              : SwapchainAcquireOutcome::kFailed;
++    default:
++      return SwapchainAcquireOutcome::kFailed;
++  }
++}
++
++}  // namespace rex::ui::vulkan
+diff --git a/src/ui/vulkan/swapchain_acquire_sync_recovery.h b/src/ui/vulkan/swapchain_acquire_sync_recovery.h
+new file mode 100644
+index 0000000..9aa4c67
+--- /dev/null
++++ b/src/ui/vulkan/swapchain_acquire_sync_recovery.h
+@@ -0,0 +1,101 @@
++/**
++ ******************************************************************************
++ * ReStreet : macOS MoltenVK acquire synchronization recovery after a reconnect
++ ******************************************************************************
++ *
++ * MoltenVK signals the acquire semaphore and fence inside
++ * MVKPresentableSwapchainImage::acquireAndSignalWhenAvailable() (MVKImage.mm
++ * 1537-1575) before MVKSwapchain::acquireNextImage() returns the result of
++ * getConfigurationResult(), i.e. before returning a stale
++ * VK_ERROR_OUT_OF_POOL_MEMORY that requests swapchain re-establishment, and
++ * before returning the VK_ERROR_OUT_OF_DATE_KHR /
++ * VK_ERROR_SURFACE_LOST_KHR that getSurfaceStatus() (MVKSwapchain.mm 103,
++ * 122-127) produces after the acquire. Core Vulkan requires the semaphore
++ * passed to vkAcquireNextImageKHR to be unsignaled, and the presenter resets
++ * only the acquire fence, so reusing that semaphore for the next acquire passes
++ * a possibly-signaled binary semaphore to the driver.
++ *
++ * On conformant drivers this cannot happen: they do not signal the acquire
++ * semaphore when the acquire does not succeed, so the presenter's existing
++ * reconnect handling never leaves it signaled. On MoltenVK the semaphore must
++ * therefore not be reused blindly after a reconnect-class acquire result; it is
++ * replaced once every in-flight reference to it has ceased.
++ *
++ * The replacement is deliberately a create-then-destroy of the handles rather
++ * than a wait or a reset: binary semaphores cannot be reset in core Vulkan, and
++ * waiting for a signal that MoltenVK may not have emitted (it also queues
++ * signalers that are only signaled, or dropped, when the image is retired) could
++ * block forever.
++ */
++
++#pragma once
++
++#include <cstdint>
++#include <vulkan/vulkan_core.h>
++
++namespace rex::ui::vulkan {
++
++// The acquire semaphore and fence of one presenter submission slot. They are
++// owned by the presenter's submission (connection-independent) rather than by
++// the swapchain.
++struct AcquireSyncHandles {
++  VkSemaphore semaphore = VK_NULL_HANDLE;
++  VkFence fence = VK_NULL_HANDLE;
++};
++
++// Host operations needed to replace an acquire semaphore and fence. Production
++// wraps VulkanDevice::Functions; the unit test supplies a fake that records the
++// call order and can inject creation failures.
++struct AcquireSyncOps {
++  VkResult (*create_semaphore)(void* context, VkSemaphore* out_semaphore);
++  VkResult (*create_fence)(void* context, VkFence* out_fence);
++  void (*destroy_semaphore)(void* context, VkSemaphore semaphore);
++  void (*destroy_fence)(void* context, VkFence fence);
++  void* context;
++};
++
++// Replaces the acquire semaphore and fence of every slot selected by
++// `pending_mask`, where `handles` has `slot_count` entries.
++//
++// The replacement pair is created before the old pair is destroyed, so a
++// creation failure leaves the slot's existing (possibly signaled) handles in
++// place rather than leaving it with no handles, and the slot is reported as
++// still pending. The function performs no waits, so a signal MoltenVK has not
++// emitted yet cannot make it block; the caller must instead invoke it only
++// after all in-flight references to the selected slots have ceased
++// (submissions completed and the queues idle), because the old handles are
++// destroyed here.
++//
++// Returns the subset of `pending_mask` that could not be replaced.
++inline uint32_t ReplacePendingAcquireSync(const AcquireSyncOps& ops, uint32_t pending_mask,
++                                          AcquireSyncHandles* handles, uint32_t slot_count) {
++  uint32_t failed_mask = 0;
++  for (uint32_t slot = 0; slot < slot_count; ++slot) {
++    const uint32_t slot_bit = uint32_t(1) << slot;
++    if (!(pending_mask & slot_bit)) {
++      continue;
++    }
++    VkSemaphore new_semaphore = VK_NULL_HANDLE;
++    VkFence new_fence = VK_NULL_HANDLE;
++    if (ops.create_semaphore(ops.context, &new_semaphore) != VK_SUCCESS) {
++      failed_mask |= slot_bit;
++      continue;
++    }
++    if (ops.create_fence(ops.context, &new_fence) != VK_SUCCESS) {
++      ops.destroy_semaphore(ops.context, new_semaphore);
++      failed_mask |= slot_bit;
++      continue;
++    }
++    if (handles[slot].semaphore != VK_NULL_HANDLE) {
++      ops.destroy_semaphore(ops.context, handles[slot].semaphore);
++    }
++    if (handles[slot].fence != VK_NULL_HANDLE) {
++      ops.destroy_fence(ops.context, handles[slot].fence);
++    }
++    handles[slot].semaphore = new_semaphore;
++    handles[slot].fence = new_fence;
++  }
++  return failed_mask;
++}
++
++}  // namespace rex::ui::vulkan
+diff --git a/src/ui/vulkan/vulkan_presenter.cpp b/src/ui/vulkan/vulkan_presenter.cpp
+index d582c50..da51bb6 100644
+--- a/src/ui/vulkan/vulkan_presenter.cpp
++++ b/src/ui/vulkan/vulkan_presenter.cpp
+@@ -48,6 +48,9 @@
+ #include <rex/ui/surface_mac.h>
+ #endif
+ 
++#include "swapchain_acquire_recovery.h"
++#include "swapchain_acquire_sync_recovery.h"
++
+ REXCVAR_DEFINE_BOOL(present_render_pass_clear, true, "UI/Presenter",
+                     "Clear render pass during presentation");
+ 
+@@ -1534,6 +1537,82 @@ VkSwapchainKHR VulkanPresenter::PaintContext::CreateSwapchainForVulkanSurface(
+   return swapchain;
+ }
+ 
++namespace {
++
++// Acquire-synchronization replacement operations (see
++// swapchain_acquire_sync_recovery.h) over VulkanDevice::Functions, matching the
++// create infos Submission::Initialize uses.
++struct AcquireSyncOpsContext {
++  const VulkanDevice::Functions* functions;
++  VkDevice device;
++};
++
++VkResult CreateAcquireSyncSemaphore(void* context, VkSemaphore* out_semaphore) {
++  const AcquireSyncOpsContext& ops_context = *static_cast<AcquireSyncOpsContext*>(context);
++  VkSemaphoreCreateInfo create_info = {};
++  create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
++  return ops_context.functions->vkCreateSemaphore(ops_context.device, &create_info, nullptr,
++                                                  out_semaphore);
++}
++
++VkResult CreateAcquireSyncFence(void* context, VkFence* out_fence) {
++  const AcquireSyncOpsContext& ops_context = *static_cast<AcquireSyncOpsContext*>(context);
++  VkFenceCreateInfo create_info = {};
++  create_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
++  return ops_context.functions->vkCreateFence(ops_context.device, &create_info, nullptr, out_fence);
++}
++
++void DestroyAcquireSyncSemaphore(void* context, VkSemaphore semaphore) {
++  const AcquireSyncOpsContext& ops_context = *static_cast<AcquireSyncOpsContext*>(context);
++  ops_context.functions->vkDestroySemaphore(ops_context.device, semaphore, nullptr);
++}
++
++void DestroyAcquireSyncFence(void* context, VkFence fence) {
++  const AcquireSyncOpsContext& ops_context = *static_cast<AcquireSyncOpsContext*>(context);
++  ops_context.functions->vkDestroyFence(ops_context.device, fence, nullptr);
++}
++
++}  // namespace
++
++// Called only after all submissions have completed and the queues are idle, so
++// no in-flight work references the acquire semaphores and fences being replaced.
++void VulkanPresenter::PaintContext::RecoverAcquireSyncAfterRetirement() {
++  if (acquire_sync_recovery_pending_ == 0) {
++    return;
++  }
++  const uint32_t slot_count = uint32_t(submissions.size());
++  AcquireSyncHandles handles[PaintContext::kSubmissionCount];
++  for (uint32_t slot = 0; slot < slot_count; ++slot) {
++    const Submission* submission = submissions[slot].get();
++    handles[slot].semaphore = submission ? submission->acquire_semaphore() : VK_NULL_HANDLE;
++    handles[slot].fence = submission ? submission->acquire_fence() : VK_NULL_HANDLE;
++  }
++  AcquireSyncOpsContext ops_context = {&vulkan_device->functions(), vulkan_device->device()};
++  const AcquireSyncOps ops = {
++      CreateAcquireSyncSemaphore,
++      CreateAcquireSyncFence,
++      DestroyAcquireSyncSemaphore,
++      DestroyAcquireSyncFence,
++      &ops_context,
++  };
++  const uint32_t failed_mask =
++      ReplacePendingAcquireSync(ops, acquire_sync_recovery_pending_, handles, slot_count);
++  for (uint32_t slot = 0; slot < slot_count; ++slot) {
++    Submission* submission = submissions[slot].get();
++    if (submission) {
++      submission->set_acquire_sync(handles[slot].semaphore, handles[slot].fence);
++    }
++  }
++  acquire_sync_recovery_failed_mask_ |= failed_mask;
++  acquire_sync_recovery_pending_ = failed_mask;
++  if (failed_mask != 0) {
++    REXLOG_ERROR(
++        "VulkanPresenter: Failed to replace the macOS acquire semaphore and "
++        "fence after a swapchain reconnect; the affected submissions will not "
++        "be reused");
++  }
++}
++
+ VkSwapchainKHR VulkanPresenter::PaintContext::PrepareForSwapchainRetirement() {
+   if (swapchain != VK_NULL_HANDLE) {
+     submission_tracker.AwaitAllSubmissionsCompletion();
+@@ -1544,6 +1623,10 @@ VkSwapchainKHR VulkanPresenter::PaintContext::PrepareForSwapchainRetirement() {
+           vulkan_device->AcquireQueue(present_queue_family, 0);
+       vulkan_device->functions().vkQueueWaitIdle(queue.queue());
+     }
++    // MoltenVK may have left the acquire semaphore signaled when it requested a
++    // reconnect; replace it now that no in-flight work references any of the
++    // acquire synchronization (see swapchain_acquire_sync_recovery.h).
++    RecoverAcquireSyncAfterRetirement();
+   }
+   const VulkanDevice::Functions& dfn = vulkan_device->functions();
+   const VkDevice device = vulkan_device->device();
+@@ -1665,6 +1748,19 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
+   const PaintContext::Submission& paint_submission =
+       *paint_context_.submissions[current_paint_submission_index % paint_submission_count];
+ 
++#if REX_PLATFORM_MAC
++  // A slot whose acquire synchronization could not be replaced after a previous
++  // reconnect must not be reused - its acquire semaphore may still be signaled
++  // (see swapchain_acquire_sync_recovery.h).
++  if (paint_context_.acquire_sync_recovery_failed_mask_ &
++      (uint32_t(1) << uint32_t(current_paint_submission_index % paint_submission_count))) {
++    REXLOG_ERROR(
++        "VulkanPresenter: The macOS acquire semaphore and fence for a "
++        "submission could not be replaced after a reconnect; not reusing it");
++    return PaintResult::kGpuLostResponsible;
++  }
++#endif
++
+   const VulkanDevice::Functions& dfn = vulkan_device_->functions();
+   const VkDevice device = vulkan_device_->device();
+ 
+@@ -1709,28 +1805,43 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
+                                 acquire_fence, &swapchain_image_index);
+   timing.Mark(1);
+   timing.acquire_timeout = acquire_result == VK_TIMEOUT || acquire_result == VK_NOT_READY;
+-  switch (acquire_result) {
+-    case VK_TIMEOUT:
+-    case VK_NOT_READY:
++  switch (ClassifySwapchainAcquireResult(acquire_result,
++#if REX_PLATFORM_MAC
++                                         true
++#else
++                                         false
++#endif
++                                         )) {
++    case SwapchainAcquireOutcome::kRetry:
+       return PaintResult::kNotPresented;
+-    case VK_SUCCESS:
+-    case VK_SUBOPTIMAL_KHR:
++    case SwapchainAcquireOutcome::kProceed:
+       break;
+-    case VK_ERROR_DEVICE_LOST:
++    case SwapchainAcquireOutcome::kDeviceLost:
+       REXLOG_ERROR(
+           "VulkanPresenter: Failed to acquire the swapchain image as the "
+           "device has been lost");
+       return PaintResult::kGpuLostResponsible;
+-    case VK_ERROR_OUT_OF_DATE_KHR:
+-    case VK_ERROR_SURFACE_LOST_KHR:
+-    case VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT:
+-      // Not an error, reporting just as info (may normally occur while resizing
+-      // on some platforms).
++    case SwapchainAcquireOutcome::kReconnect:
++      // Not necessarily an error: an outdated swapchain or surface normally
++      // occurs while resizing, and MoltenVK reports drawable exhaustion as
++      // VK_ERROR_OUT_OF_POOL_MEMORY for the same purpose (see
++      // swapchain_acquire_recovery.h). Recreating the swapchain is the recovery
++      // in both cases, and it also releases the image that was already taken
++      // into the acquired state by vkAcquireNextImageKHR.
++#if REX_PLATFORM_MAC
++      // MoltenVK signals the acquire semaphore before returning this result, so
++      // it may be left signaled even though the frame is dropped; replace it
++      // when the swapchain is retired (see swapchain_acquire_sync_recovery.h).
++      // Conformant drivers do not signal the semaphore for a failed acquire, so
++      // only the macOS path needs this.
++      paint_context_.acquire_sync_recovery_pending_ |=
++          uint32_t(1) << uint32_t(current_paint_submission_index % paint_submission_count);
++#endif
+       REXLOG_INFO(
+           "VulkanPresenter: Presentation to the swapchain image has been "
+           "dropped as the swapchain or the surface has become outdated");
+       return PaintResult::kNotPresentedConnectionOutdated;
+-    default:
++    case SwapchainAcquireOutcome::kFailed:
+       REXLOG_ERROR("VulkanPresenter: Failed to acquire the swapchain image");
+       return PaintResult::kNotPresented;
+   }
