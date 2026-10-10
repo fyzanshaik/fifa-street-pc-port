@@ -29,13 +29,14 @@ reproducible Mac game is the foundation.
 |---|---|
 | Apple Silicon | Native build; boot, menus and playable matches manually checked |
 | Gameplay and audio | Latest feedback reports good gameplay and improved music/menu response |
+| Window resizing | Blank-window defect fixed; owner confirmed resizing works on the tested Mac |
 | Distribution | Source-build preview; no downloadable Mac game binary |
 | Performance | About 25 distinct displayed outputs/sec in late main-menu diagnostics; sustained 60 FPS unverified |
 | Intel Macs | Untested |
 | AI benchmarks | Experimental capture/controller seams exist; model integration and end-to-end evaluations are future work |
 
 Tested on an **Apple M5 MacBook, 16 GB RAM, macOS 26.6.2**. Save/reload, every
-mode, multiple controllers and live resizing are not fully validated. See the
+mode, multiple controllers and background/display transitions are not fully validated. See the
 [validation status](docs/STATUS.md) and [engineering log](LOG/PROGRESS.md) for
 what was measured and what remains open.
 

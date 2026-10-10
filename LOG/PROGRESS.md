@@ -22,7 +22,7 @@ validated match/evaluation pipeline.
 
 This is a source-build Apple Silicon preview. It is not the original EA source;
 it recompiles supported original Xbox binaries into native guest code, linked to
-our host/runtime. Save/reload, every mode, multiple controllers, live resizing,
+our host/runtime. Save/reload, every mode, multiple controllers, background/display transitions,
 Intel Macs and sustained 60 FPS remain incompletely validated. Latest late
 main-menu measurements are about 25 new displayed outputs/s, not proof of 60 FPS
 or a measurement of simulation tick rate. Good gameplay is a human observation,
@@ -572,6 +572,74 @@ requested, while retaining the upstream port and runtime credits. Performance
 figures retain screen/cache and measurement limitations; planned AI evaluations
 remain clearly marked as future work. This is documentation-only work: no build,
 gameplay, runtime setting or keyboard binding changed.
+
+### Fixed blank window after live resize
+
+The owner reports that even a small manual window resize can leave the game
+window blank. The supplied MoltenVK log shows an initial three-image swapchain
+at 1280×720 and a replacement three-image swapchain at 1825×1045 on an Apple M5
+with an LG ULTRAWIDE display. Primitive-restart warnings appeared before the
+replacement; the log alone does not identify the cause or establish that
+presentation resumed. Earlier acquire classifier/sync tests did not verify this
+live resize case.
+
+The owner confirmed that audio continues while the resized window is blank.
+OpenCode Build used official `deepseek/deepseek-flash`, verified in T3 execution
+metadata. Investigation began while the game was running; builds and packaging
+waited until a read-only process check found it closed. The real game was never
+launched, automated or stopped by the investigation.
+
+**Reproducer and cause.** A separate SDL fixture drives the real
+`VulkanPresenter` and MoltenVK, with a thread publishing synthetic nonblank guest
+output. Against the original runtime, resizing to 1600×900 and 1825×1045 left
+the `CAMetalLayer` drawable at 1×1, producing a failing dimensions check. In the
+pinned MoltenVK, `MVKSwapchain::initCAMetalLayer` sets the new extent and then
+can call the old swapchain's `forceUnpresentedImageCompletion`, which assigns
+1×1 when presentations remain unfinished. The presenter had no subsequent
+restoration. This supplies a concrete failure mechanism consistent with the
+owner's symptom; the fixture does not inspect final screen pixels.
+
+**Fix and evidence.** The Mac presenter restores the created swapchain's extent
+on its layer after successful recreation and retirement of the old swapchain.
+The change is saved in the third production patch, with a new private helper
+header. The consumer's `rexruntime` target rebuilt successfully; canonical
+runtime staging and fresh-inode packaging refreshed `build/macos/out/FIFA
+Street.app`. Host/GPU sources and validated runtime settings did not change.
+Codex independently ran the resize fixture: 1600×900, 1825×1045 and 1500×800
+all retained the expected dimensions; the forced-1×1 control failed at all
+three sizes. Fresh pinned-source patch sequencing passed 20 checks, existing
+acquire classifier/sync GREEN and RED checks passed, and canonical artifact
+and bundle verification passed. Raw output remains in ignored
+`build/macos/logs/presenter-resize/`.
+
+**Review and final verification.** The initial test accepted any nonzero
+negative-control exit and cached a queue without retaining its lock for
+submission. A fresh follow-up worker added a dedicated drawable-defect exit
+status (4), required mismatch/failure sentinels, a process watchdog, Vulkan
+result checks, queue locking and GPU resource cleanup before device destruction.
+The probe checks successful refresh and paint activity, reads SDL surface pixel
+dimensions and no longer explicitly activates its window. Codex reran the
+hardened suite: GREEN exit 0, all three sizes correct, 115 successful refreshes,
+83 paint events and zero refused refreshes/painter failures; RED exit 4, all
+three sizes at 1×1, 114 successful refreshes and zero painter failures. These
+activity counts establish fixture activity, not visible game pixels or FPS.
+
+`scripts/install-macos.sh --force` refreshed the existing installed app after
+another no-game-process check. Codex independently verified the installed bundle
+and its 25 keyboard bindings through the real MnK driver. Installed and canonical
+runtime hashes match. Commands, hashes and limits are recorded in
+[the resize evidence summary](evidence/macos-resize-recovery.md).
+
+The owner then tested the updated installed game and confirmed “works!” for
+resizing, closing the reported manual reproduction. This establishes recovery
+for that check on the tested Mac, not every resize/background scenario.
+Background recovery and Intel Macs remain unverified. The probe uses pixel
+dimensions, but the wrapper's exact 1825×1045
+sentinel targets the tested external display's 1× scale; a Retina-only fixture
+run needs corresponding wrapper expectations. Do not infer visible nonblank
+output solely from drawable sizes. Agents did not launch or control the real
+game; the final game check was performed by the owner. The owner requested
+publication of this fix on the fork after confirming success.
 
 ## Next work
 

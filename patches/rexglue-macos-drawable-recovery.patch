@@ -228,21 +228,113 @@ index 0000000..9aa4c67
 +}
 +
 +}  // namespace rex::ui::vulkan
+diff --git a/src/ui/vulkan/swapchain_layer_size_recovery.h b/src/ui/vulkan/swapchain_layer_size_recovery.h
+new file mode 100644
+index 0000000..2b1e6b7
+--- /dev/null
++++ b/src/ui/vulkan/swapchain_layer_size_recovery.h
+@@ -0,0 +1,64 @@
++/**
++ ******************************************************************************
++ * ReStreet : macOS CAMetalLayer drawable-size recovery after a swapchain
++ *            recreation
++ ******************************************************************************
++ *
++ * MoltenVK's vkCreateSwapchainKHR workaround for presentations that have not
++ * completed yet
++ * (MVKSwapchain::forceUnpresentedImageCompletion, called from
++ * MVKSwapchain::initCAMetalLayer) resets the CAMetalLayer's drawableSize to
++ * 1x1 once it has finished resetting that size to the new swapchain extent:
++ *
++ *   mtlLayer.drawableSize = mvkCGSizeFromVkExtent2D(_imageExtent);   // correct
++ *   ...
++ *   if (oldSwapchain && imageExtent == surface->getExtent())
++ *       oldSwapchain->forceUnpresentedImageCompletion();             // 1x1
++ *
++ * The extent equality is always true there, because the line above has just
++ * assigned _imageExtent to the layer, and MVKSurface::getExtent() reads that
++ * same layer. The intent is that "the drawableSize will be set to a correct size
++ * by the next swapchain created on the same surface" - but the presenter creates
++ * exactly one new swapchain per reconnect, so nothing restores the size. The
++ * layer then keeps a 1x1 drawable stretched by the compositor over the whole
++ * window: the window goes blank while the guest keeps rendering, and every
++ * acquire/present returns VK_SUBOPTIMAL_KHR indefinitely.
++ *
++ * This is deliberately a re-application of the size the layer should already
++ * have (the extent of the swapchain that was just created), not a new resize
++ * policy: no wait, reset or platform-specific present mode change is involved.
++ * The window system owns resizing; this only undoes MoltenVK's forced 1x1.
++ */
++
++#pragma once
++
++#include <cstdint>
++
++#include <rex/platform.h>
++
++#if REX_PLATFORM_MAC
++#include <CoreGraphics/CGGeometry.h>
++#include <objc/message.h>
++#include <objc/objc.h>
++#include <objc/runtime.h>
++#endif
++
++namespace rex::ui::vulkan {
++
++#if REX_PLATFORM_MAC
++// `layer` is the CAMetalLayer backing the VkMetalSurfaceEXT surface of the
++// swapchain that was just created (`CAMetalLayerSurface::layer()`). Must be
++// called on the UI thread, immediately after vkCreateSwapchainKHR succeeds.
++inline void RestoreMacSwapchainLayerDrawableSize(const void* layer, uint32_t width,
++                                                 uint32_t height) {
++  if (!layer || !width || !height) {
++    return;
++  }
++  static const SEL set_drawable_size = sel_registerName("setDrawableSize:");
++  using SetDrawableSizeFn = void (*)(id, SEL, CGSize);
++  reinterpret_cast<SetDrawableSizeFn>(&objc_msgSend)((id)layer, set_drawable_size,
++                                                     CGSizeMake(CGFloat(width), CGFloat(height)));
++}
++#endif
++
++}  // namespace rex::ui::vulkan
 diff --git a/src/ui/vulkan/vulkan_presenter.cpp b/src/ui/vulkan/vulkan_presenter.cpp
-index d582c50..da51bb6 100644
+index c0dc6db..789f5f4 100644
 --- a/src/ui/vulkan/vulkan_presenter.cpp
 +++ b/src/ui/vulkan/vulkan_presenter.cpp
-@@ -48,6 +48,9 @@
+@@ -51,6 +51,10 @@
  #include <rex/ui/surface_mac.h>
  #endif
  
 +#include "swapchain_acquire_recovery.h"
 +#include "swapchain_acquire_sync_recovery.h"
++#include "swapchain_layer_size_recovery.h"
 +
  REXCVAR_DEFINE_BOOL(present_render_pass_clear, true, "UI/Presenter",
                      "Clear render pass during presentation");
  
-@@ -1534,6 +1537,82 @@ VkSwapchainKHR VulkanPresenter::PaintContext::CreateSwapchainForVulkanSurface(
+@@ -986,6 +990,20 @@ VulkanPresenter::ConnectOrReconnectPaintingToSurfaceFromUIThread(Surface& new_su
+     // Successfully attached (at least for now).
+   }
+ 
++#if REX_PLATFORM_MAC
++  // MoltenVK's swapchain-creation workaround for incompletely-retired
++  // presentations can leave the CAMetalLayer's drawable size at 1x1 even though
++  // it assigned the new swapchain extent first; nothing else restores it, and
++  // the window then shows a 1x1 drawable stretched over the whole surface. Put
++  // the size the layer should already have back (see
++  // swapchain_layer_size_recovery.h).
++  if (new_surface.GetType() == Surface::kTypeIndex_CAMetalLayer) {
++    RestoreMacSwapchainLayerDrawableSize(
++        static_cast<const CAMetalLayerSurface&>(new_surface).layer(),
++        paint_context_.swapchain_extent.width, paint_context_.swapchain_extent.height);
++  }
++#endif
++
+   // From now on, in case of failure,
+   // paint_context_.DestroySwapchainAndVulkanSurface must be called before
+   // returning.
+@@ -1532,6 +1550,82 @@ VkSwapchainKHR VulkanPresenter::PaintContext::CreateSwapchainForVulkanSurface(
    return swapchain;
  }
  
@@ -325,7 +417,7 @@ index d582c50..da51bb6 100644
  VkSwapchainKHR VulkanPresenter::PaintContext::PrepareForSwapchainRetirement() {
    if (swapchain != VK_NULL_HANDLE) {
      submission_tracker.AwaitAllSubmissionsCompletion();
-@@ -1544,6 +1623,10 @@ VkSwapchainKHR VulkanPresenter::PaintContext::PrepareForSwapchainRetirement() {
+@@ -1542,6 +1636,10 @@ VkSwapchainKHR VulkanPresenter::PaintContext::PrepareForSwapchainRetirement() {
            vulkan_device->AcquireQueue(present_queue_family, 0);
        vulkan_device->functions().vkQueueWaitIdle(queue.queue());
      }
@@ -336,7 +428,7 @@ index d582c50..da51bb6 100644
    }
    const VulkanDevice::Functions& dfn = vulkan_device->functions();
    const VkDevice device = vulkan_device->device();
-@@ -1665,6 +1748,19 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
+@@ -1665,6 +1763,19 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
    const PaintContext::Submission& paint_submission =
        *paint_context_.submissions[current_paint_submission_index % paint_submission_count];
  
@@ -356,7 +448,7 @@ index d582c50..da51bb6 100644
    const VulkanDevice::Functions& dfn = vulkan_device_->functions();
    const VkDevice device = vulkan_device_->device();
  
-@@ -1709,28 +1805,43 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
+@@ -1709,28 +1820,43 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
                                  acquire_fence, &swapchain_image_index);
    timing.Mark(1);
    timing.acquire_timeout = acquire_result == VK_TIMEOUT || acquire_result == VK_NOT_READY;

@@ -128,6 +128,8 @@ Run checks appropriate to the change, and capture exact commands/results:
 
 ```sh
 bash scripts/test-macos-patch-sequence.sh
+bash scripts/test-macos-drawable-recovery.sh
+bash scripts/test-macos-presenter-resize.sh
 bash scripts/test-macos-guest-clock.sh
 bash scripts/test-macos-runtime-clock.sh build/macos/out
 bash scripts/test-macos-keyboard-profile.sh build/macos/out

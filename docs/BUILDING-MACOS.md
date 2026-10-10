@@ -13,7 +13,7 @@ not gameplay validation.
 playable; latest owner feedback reports good gameplay and improved music/menu
 response. Normal play uses the stable Mac settings described below. This is a
 source-build preview: sustained 60 FPS, save/reload, every mode, multiple
-controllers and live resizing are not fully verified. Intel is experimental and
+controllers and background/display transitions are not fully verified. Intel is experimental and
 untested. See [STATUS.md](STATUS.md), [controls](CONTROLS-MACOS.md) and the
 [consolidated progress/diagnostic log](../LOG/PROGRESS.md). Earlier severe menu
 slowness and black-screen reports are historical context, not the latest status.
@@ -285,16 +285,27 @@ the affected submission slot's acquire semaphore and fence
 (`src/ui/vulkan/swapchain_acquire_sync_recovery.h`). Non-macOS paths are
 unchanged.
 
+The same patch also restores the `CAMetalLayer` drawable size after successful
+swapchain recreation. In the pinned MoltenVK, a workaround for unfinished
+presentations can reset that size to 1×1 after assigning the new extent. A
+fixture reproduced this on resize while synthetic guest output continued. The
+Mac presenter now restores the extent of the newly created swapchain.
+
 What is and is not verified:
 
 - Verified: the classification and the semaphore replacement are unit-tested
   (`scripts/test-macos-drawable-recovery.sh`: 45 checks - 22 classifier, 23
   acquire-sync - each RED-failing without the change), and the patch applies,
   reverses and coexists with the presentation-candidate patch.
-- Not verified: that this is the cause of the observed black screen, or that it
-  clears it. The production translation unit now compiles and links against the
-  patch and a fixed 90 s boot reached the title and autosave prompt, but no live
-  black-screen or resize/drawable-starvation repro has been run.
+- Verified: `scripts/test-macos-presenter-resize.sh` drives the real presenter,
+  MoltenVK and an SDL diagnostic window with synthetic guest output. The
+  original runtime left the drawable at 1×1 after resize; the updated runtime
+  retains the surface extent. This checks drawable dimensions, not final screen
+  pixels, and opens only its own fixture window without game assets or input.
+- Manually verified: the owner confirmed that resizing the updated installed
+  game works on the tested Mac. This and the fixture do not establish that every
+  historical black screen, background transition or drawable-starvation case
+  is fixed.
 
 `scripts/test-macos-patch-sequence.sh` exercises the ordered application of the
 three patches (through `scripts/rexglue-patches.sh`) against real pinned source

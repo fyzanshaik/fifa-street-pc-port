@@ -82,7 +82,7 @@ controls. This is not a prebuilt Mac release or a claim of sustained 60 FPS.
 | Keyboard profile | Real MnK fixture checks 25 bindings, releases and simultaneous movement+sprint+pass |
 | Guest clock | Rate defect reproduced before fix; anchored conversion/concurrency/TSAN and public time controls pass |
 | Idle waits, dormant overlays and shader-cache reload | Focused regressions pass; manual comparisons show improvements |
-| Acquire/drawable recovery | Classifier/sync tests and build pass; all live resize/background cases remain unverified |
+| Acquire/drawable recovery | Resize fixture and classifier/sync checks pass; owner confirms the installed fix works when resizing the game; background recovery remains unverified |
 | Save/reload, every mode, multiple controllers, long sessions | Not fully verified |
 | Intel Mac | Untested |
 | Agentic model matches / deterministic evaluations | Future work; local control/capture tools are experimental |
