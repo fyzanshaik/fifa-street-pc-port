@@ -2,102 +2,90 @@
 
 <img src="docs/images/project-icon.png" alt="ReStreet" width="64">
 
-# ReStreet - FIFA Street 2012 Recompiled
+# ReStreet on macOS
 
-**FIFA Street (2012) on Windows PC, built with ReXGlue. Bring your own game.**
+**FIFA Street (2012), recompiled for Mac. Bring your own game.**
 
-### Ported by: SamuelitoDaVila
-
-[Download](https://github.com/samuelit0davila/fifa-street-pc-port/releases/latest) · [Changelog](CHANGELOG.md) · [Report a bug](https://github.com/samuelit0davila/fifa-street-pc-port/issues) · [Build from source](docs/BUILDING.md)
-
-<img src="docs/images/start-screen.png" alt="ReStreet running on PC" width="1000">
+[Mac setup](docs/BUILDING-MACOS.md) · [Controls](docs/CONTROLS-MACOS.md) · [Progress and diagnostics](LOG/PROGRESS.md) · [Agent instructions](AGENTS.md)
 
 </div>
 
-## What is this
+This is [FyZan Shaik's macOS fork](https://github.com/fyzanshaik/fifa-street-pc-port/tree/main) of **[SamuelitoDaVila's ReStreet](https://github.com/samuelit0davila/fifa-street-pc-port)**. SamuelitoDaVila created the original Windows port, installer and launcher. This fork builds on that work to make the game usable, buildable and easy to experiment with on macOS.
 
-ReStreet is a Windows PC version of FIFA Street (2012) made by recompiling the Xbox 360 game with [ReXGlue](https://github.com/rexglue/rexglue-sdk). It comes with a graphical installer and a launcher with Direct3D 12 and Vulkan support, display and resolution settings, and performance profiles.
+Our longer-term goal is **agentic game benchmarks**: human versus AI and AI versus AI, with repeatable observations, actions and evaluation results. Getting a reliable Mac game comes first. Experimental capture and virtual-controller tools exist; an end-to-end AI benchmark, model integration and deterministic evaluation environment are future work.
 
-You need your own copy of the game: an Xbox 360 ISO of FIFA Street (2012). The ISO and the game files are not included.
+## Current status
 
-**v1.1 is offline only.** It has no online play.
+On the tested Apple Silicon MacBook, the game builds natively, boots, accepts keyboard input and has reached playable matches. The latest manual feedback reports good gameplay and improved music and menu response. We have paused further performance tuning to finish the play/install experience.
 
-## What's new in v1.1
+This is a **source-build Mac preview**, not a downloadable Mac binary release. Sustained 60 FPS, every game mode, save/reload, multiple controllers and live resizing are not fully validated. Late main-menu diagnostics measured around 25 new displayed outputs per second. Intel Macs are untested. See [validation status](docs/STATUS.md) and the [complete engineering log](LOG/PROGRESS.md) for evidence and limitations.
 
-- **ReStreet main menu logo**, applied from the new `Mods` folder without changing your game files.
-- **Improved "Some" graphics readback**, now the default: less graphical garbage on floors and reflections, with the same speed.
-- **VSync works smoothly.** It keeps the game locked to your refresh rate with no tearing.
-- **Direct play:** start the game without the launcher window using `FifaStreetLauncher.exe --play`, or create a desktop shortcut with the new **Shortcut** button.
-- **Launcher and setup fit any screen**, at any resolution and Windows scale.
-- Your saves and settings are kept when you update. See the full [changelog](CHANGELOG.md).
+## Build and play on Mac
 
-## What's new in v1.0
+You need an Apple Silicon Mac, Xcode 16+ / AppleClang 16+ (or LLVM Clang 18+), CMake, Ninja, Python 3 and your own extracted FIFA Street (2012) Xbox 360 `GameData`. Only the [validated module revision](scripts/supported-macos-inputs.json) is supported. Game assets and original executables are not included.
 
-- **Performance profiles** in the launcher: Balanced (default), Quality for strong PCs, and Performance for weaker PCs.
-- **Shader cache included**, so the first matches have fewer slow moments.
-- **FPS counter:** press **Home** to show or hide it.
-- **Exit shortcut:** hold **START** and press **B** (Xbox layout) or **START** and **Circle** (PlayStation layout) to open the exit prompt. A confirms, B cancels.
-- **New launcher and installer design.** Both follow the Windows display scale and shrink to fit small screens.
-- Same game files as v0.4.1, so your saves and settings keep working. See the full [changelog](CHANGELOG.md).
+```sh
+git clone --branch main https://github.com/fyzanshaik/fifa-street-pc-port.git
+cd fifa-street-pc-port
+brew install cmake ninja
 
-<img src="docs/images/launcher.png" alt="The ReStreet launcher" width="1000">
+./scripts/build-macos.sh --gamedata "/absolute/path/to/GameData" --jobs 2
+./scripts/play-macos.sh
+```
 
-## Download and install
+The build pins and prepares ReXGlue, applies the Mac patches, recompiles your game and packages `build/macos/out/FIFA Street.app`. The first build takes time; later builds reuse the SDK and generated code. `--check-only` validates prerequisites and game inputs before compiling.
 
-1. Download **FifaStreetSetup.exe** from the [latest release](https://github.com/samuelit0davila/fifa-street-pc-port/releases/latest) and check its SHA-256 against the value on the release page.
-2. Run it, choose your FIFA Street ISO and an empty folder, then press **INSTALL ReStreet**.
-3. When it finishes, press **OPEN LAUNCHER**, pick your settings and press **PLAY**.
+To install the built app for Finder access without copying game assets:
 
-To update from an earlier version, select the folder that contains `Game` and `GameData`. No ISO is needed, and your saves and settings are kept. Only game versions that match the three verified original module hashes are accepted.
+```sh
+./scripts/install-macos.sh
+```
 
-No compiler, Visual Studio or Internet connection is needed.
+This installs into `~/Applications`; an existing app is replaced only with
+`--force`. The normal play command has **no time limit**. You can also open the produced `.app` in Finder. Keep the original `GameData` folder in place: the app links to it instead of copying it. Follow the [Mac setup guide](docs/BUILDING-MACOS.md) for installation, toolchain troubleshooting, rebuilding and logs.
 
-<img src="docs/images/installer.png" alt="The ReStreet installer" width="900">
+## Basic keyboard controls
 
-## System requirements
+The shipped profile keeps **arrows for movement** and **Space to confirm/pass**. Xbox button prompts remain in the game.
 
-These are estimates from my own testing, not guarantees. If you try it on an older PC, tell me your specs and FPS.
-
-| | |
+| Key | Action / Xbox button |
 |---|---|
-| System | Windows 10 or 11, 64-bit |
-| CPU | x86-64 with SSSE3; a quad-core is safest |
-| GPU | Direct3D 12 or Vulkan with up-to-date drivers (about GTX 900 / RX 400 or newer) |
-| RAM | 8 GB |
-| Disk | 12 GB free to install, 2 GB to update |
-| Game | Your own FIFA Street (2012) Xbox 360 ISO |
+| Arrow keys | Move player or menu selection / left stick |
+| Space | Confirm, pass / A |
+| D or Backspace | Back in menus, shoot / B |
+| A | Lob pass, manual tackle / X |
+| S | Through pass, hold to rush goalkeeper / Y |
+| E | Sprint / RT |
+| Q | Street Ball Control, defensive jockey / LT |
+| W | Flair modifier, change defender / LB |
+| R | Flick ball up / RB |
+| I, J, K, L | Skill-stick directions / right stick |
+| Enter | Start / pause |
 
-On a weaker PC, choose the **Performance** profile in the launcher.
+For a first match, use **arrows + E** to run, **Space** to pass, and **D** to shoot. Hold Enter and press D to open the host exit prompt; Space confirms. Closing the game window also exits.
 
-## Graphics backends
+The [full key reference](docs/CONTROLS-MACOS.md) includes stick clicks, tactics and customization. Gameplay actions follow [EA's FIFA Street Xbox 360 manual](https://eaassets-a.akamaihd.net/eahelp/manuals/fifa-street-manuals_Microsoft%20XBOX360.pdf); custom in-game controller layouts can change them.
 
-The launcher packages two validated ReXGlue graphics backends: **Direct3D 12** (the default, with GPU selection) and **Vulkan** (automatic device selection). It switches the matching runtime files by itself when you change the graphics API.
+## What changed for Mac
 
-Full readback is the validated mode for both. The Compatibility panel offers Some, Fast and None for more FPS, but those modes are not validated and can cause graphical corruption.
+- Native Apple Silicon build and `.app` packaging with Vulkan through bundled MoltenVK.
+- Mac module loading, build portability and bounded generated registration tables.
+- Guest startup event ordering and PowerPC memory barriers.
+- Precise idle waits, dormant-overlay redraw suppression and stable host presentation settings.
+- Correct shader-cache reload on Darwin and an accurate Mac guest clock without a shared mutex on every read.
+- Arrow-key controls and opt-in frame, audio and CPU diagnostics with focused regression tests.
 
-## Resolution
+All SDK changes are saved as patches applied to the pinned source. `ReXGlue/` and generated guest code are local build products. Read [LOG/PROGRESS.md](LOG/PROGRESS.md) before changing performance settings: it records successful fixes, unsuccessful comparisons, measurement limits and mistakes to avoid.
 
-Output resolution and internal rendering resolution are separate settings.
+## Windows and upstream
 
-- **Output resolution:** the window or screen size, for example 1280x720 up to 3840x2160.
-- **Internal resolution:** a whole-number scale of the game's 1280x720 base: 1x is 1280x720, 2x is 2560x1440, 3x is 3840x2160 and 4x is 5120x2880.
+The original Windows installer, launcher and build path are preserved. Use [SamuelitoDaVila's releases](https://github.com/samuelit0davila/fifa-street-pc-port/releases) for Windows downloads and [docs/BUILDING.md](docs/BUILDING.md) to build the Windows version. Those `.exe` downloads are not Mac installers. The Windows v1.1 changes are retained. Mac builds use a separate saved base patch from the version we tested; the newer Windows SDK changes have not been validated on Mac.
 
-High settings are there for testing and do not promise 60 FPS.
+## Credits and license
 
-## Status
+- **[SamuelitoDaVila](https://github.com/samuelit0davila/fifa-street-pc-port)** — original ReStreet port, Windows installer and launcher.
+- **FyZan Shaik** — this Mac fork, direction, manual gameplay checks and future agent-benchmark goal; development assisted by OpenAI Codex and OpenCode with DeepSeek.
+- **Emran_Ahm3d** — upstream investigations into patch line endings, module registration and game-data paths, FootballCompEng boundaries and resource-compiler compatibility.
+- **[ReXGlue](https://github.com/rexglue/rexglue-sdk)** and **[Xenia](https://github.com/xenia-project/xenia)** — recompilation/runtime foundations; SDL, Vulkan, MoltenVK, LLVM, CMake, Ninja and other dependencies retain their own notices.
 
-This is the first stable release, but it is still a community port: performance depends on your hardware, drivers and settings. World Tour, Practice, Direct3D 12 and Vulkan were tested on earlier releases; this release changes the launcher, installer, overlays and the performance options.
-
-See [known issues and validation](docs/STATUS.md). If you find a problem, [open an issue](https://github.com/samuelit0davila/fifa-street-pc-port/issues) with your hardware, Windows and driver versions, the graphics API and settings, and the logs from **Open logs** in the launcher. Please do not upload ISOs or game files.
-
-## Credits and licence
-
-I developed this project with assistance from **ChatGPT, OpenAI Codex and Anthropic's Claude (Claude Code)**, and directed and tested the work myself.
-
-Thanks to **Emran_Ahm3d** for investigating and suggesting the Windows patch line-ending fix, module-registration path handling, flexible game-data paths, the FootballCompEng function-boundary override and resource-compiler compatibility.
-
-Thanks to [ReXGlue](https://github.com/rexglue/rexglue-sdk), [Xenia](https://github.com/xenia-project/xenia), [extract-xiso](https://github.com/XboxDev/extract-xiso), LLVM, CMake, Ninja, .NET and MonoGame. See the [third-party notices](licenses/README.md).
-
-My original installer, launcher and scripts use the [MIT License](LICENSE). Third-party components keep their own licences. The installer includes generated game binaries; the MIT licence does not establish the right to redistribute them, and no legal clearance is claimed. FIFA Street, its game content, artwork and trademarks belong to their respective owners.
-
-This is an unofficial community project, with no affiliation to EA, Microsoft or Xbox.
+Original project-authored code uses the [MIT License](LICENSE), with its existing copyright notice retained. SDK patches and third-party components retain their own licenses; see [third-party notices](licenses/README.md). This repository does not include game assets, original Xbox executables, generated game code or a Mac game binary. FIFA Street content, artwork and trademarks belong to their respective owners. This is an unofficial community project, unaffiliated with EA, Microsoft or Xbox.

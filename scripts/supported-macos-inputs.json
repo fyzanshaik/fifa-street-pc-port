@@ -1,0 +1,10 @@
+{
+  "schema": "restreet-macos-supported-inputs/1",
+  "label": "ReStreet validated FIFA Street (2012) macOS input revision",
+  "note": "SHA-256 of the three original Xbox 360 modules this source tree was validated against, measured from our own extracted retail GameData. This is NOT an externally published official manifest. The macOS recompiled startup hooks are keyed to fixed guest instruction addresses, so only this exact revision can be recompiled correctly; other regions or revisions are unsupported.",
+  "modules": {
+    "default.xex": "f4902ab0a2515ca64675544852a0263ba429863dad13dc19b7c2d989c97aa2b1",
+    "fifadllzf.xex.dll": "9d2fb47c3caf279d55962f671afc5b8eb7a597717d44ccb5995dd002a3c26201",
+    "dlc/dlc_FootballCompEng/dlc/FootballCompEng/FootballCompEngzf.xex.dll": "a5fa0ee8c6f877636f4b5498eadbd23180d28532cb9e2f7a53da872fd890ba81"
+  }
+}

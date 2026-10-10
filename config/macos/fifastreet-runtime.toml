@@ -1,0 +1,48 @@
+# FIFA Street (ReStreet) macOS runtime configuration.
+# Loaded from the executable folder; edit in place or pass --<cvar>=<value> on
+# the command line. See the Settings overlay in-game for the full list.
+#
+# This is the shipped source-of-truth template: scripts/build-macos.sh copies it
+# to <out>/fifastreet.toml and appends config/macos/keyboard-arrows.toml. Editing
+# an already-built config leaves it alone; re-run the build (or
+# scripts/apply-macos-keyboard-profile.sh for the keybinds only) to change it.
+
+# --- display / rendering (Apple Silicon, MoltenVK) ---
+render_target_path_vulkan = "fbo"
+vulkan_device = -1
+video_mode_width = 1280
+video_mode_height = 720
+video_mode_refresh_rate = 60
+fullscreen = false
+vsync = true
+native_2x_msaa = false
+async_shader_compilation = false
+swap_post_effect = "none"
+
+# --- macOS stable launch ---
+# Persisted here so a Finder double-click of "FIFA Street.app" gets the same
+# presentation behaviour as scripts/play-macos.sh instead of only a hand-typed
+# terminal command. The MoltenVK synchronous-submit default is applied by the
+# host itself (src/macos_host_defaults.h) because MoltenVK reads it from the
+# environment, not from this file.
+vulkan_macos_unpaced_present = true
+macos_idle_toast_sleep = true
+macos_idle_exit_overlay_sleep = true
+
+# --- game-specific GPU workarounds (same as the Windows release config) ---
+execute_unclipped_draw_vs_on_cpu = true
+execute_unclipped_draw_vs_on_cpu_with_scissor = false
+depth_float24_convert_in_pixel_shader = true
+guest_vblank_unlocked = false
+readback_resolve = "full"
+readback_memexport = true
+readback_memexport_fast = true
+clear_memory_page_state = false
+occlusion_query_enable = true
+vulkan_log_sync_timing = false
+vulkan_log_render_targets = false
+vulkan_log_resolve_contents = false
+
+# --- input: SDL gamepad, plus keyboard/mouse emulation for keyboard players ---
+input_backend = "sdl"
+mnk_mode = true

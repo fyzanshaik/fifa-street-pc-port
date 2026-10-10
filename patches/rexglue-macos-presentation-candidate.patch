@@ -1,0 +1,535 @@
+diff --git a/src/ui/vulkan/present_diag_state.h b/src/ui/vulkan/present_diag_state.h
+new file mode 100644
+index 0000000..484dfc3
+--- /dev/null
++++ b/src/ui/vulkan/present_diag_state.h
+@@ -0,0 +1,254 @@
++/**
++ ******************************************************************************
++ * ReStreet : macOS present-submit diagnostics state machine
++ ******************************************************************************
++ *
++ * Opt-in bookkeeping for the macOS present/submit freeze investigation.
++ *
++ * The presenting thread brackets each present envelope in three calls:
++ *   Begin()            - before AcquireQueue, so the queue-lock wait is timed;
++ *   EnterSubmitPhase() - once AcquireQueue returned (the shared queue mutex is
++ *                        held) and vkQueueSubmit is about to run;
++ *   End()              - on *every* return path, clearing the outstanding
++ *                        envelope. A fast return is therefore never left
++ *                        looking "in flight".
++ *
++ * A separate watchdog thread calls Tick() a few times a second. Tick() returns
++ * the bounded set of lines that should be logged now: a once-per-interval
++ * summary, at most one long-submit line per interval, and at most one watchdog
++ * line per outstanding episode. There is deliberately no per-submit logging, so
++ * a healthy 60 Hz run emits ~1 line/s, not 60.
++ *
++ * This header is std-only and has no ReXGlue dependency so the exact state
++ * machine can be driven by test/present_diag_state_test.cpp with synthetic
++ * timestamps and no thread, GPU or guest code. The runtime wrapper lives in
++ * vulkan_presenter.cpp and is inert unless RESTREET_PRESENT_DIAG is set.
++ */
++
++#pragma once
++
++#include <atomic>
++#include <cstdint>
++#include <vector>
++
++namespace rex::ui::vulkan::present_diag {
++
++enum class EventKind : uint8_t {
++  kNone = 0,
++  kSummary,     // once per config.summary_interval_ns
++  kLongSubmit,  // first slow completion since the last long-submit line
++  kWatchdog,    // once per outstanding episode that crosses config.watchdog_ns
++};
++
++// Consistent-enough read of the live counters. Field reads are atomic; a
++// watchdog snapshot may interleave with an in-flight envelope, which is
++// acceptable for a diagnostic line.
++struct Snapshot {
++  uint64_t started = 0;            // present envelopes begun
++  uint64_t completed = 0;          // present envelopes returned
++  int64_t last_result = 0;         // last VkResult cast to int
++  int64_t max_duration_ns = 0;     // max whole-envelope duration so far
++  uint64_t active_id = 0;          // id of the outstanding envelope; 0 = none
++  int64_t active_duration_ns = 0;  // now - active start; 0 when none outstanding
++  uint64_t swapchain_generation = 0;
++  int64_t acquire_max_ns = 0;  // max time blocked acquiring the queue lock
++  int64_t submit_max_ns = 0;   // max time inside vkQueueSubmit (lock held)
++  uint64_t slow_completed = 0; // completions >= config.long_submit_ns
++  bool in_submit_phase = false; // outstanding envelope is past AcquireQueue
++};
++
++struct Event {
++  EventKind kind = EventKind::kNone;
++  Snapshot snapshot;
++  uint64_t id = 0;                // envelope id the line refers to
++  int64_t duration_ns = 0;        // whole envelope
++  int64_t acquire_ns = 0;         // Begin -> EnterSubmitPhase (queue lock wait)
++  int64_t submit_ns = 0;          // EnterSubmitPhase -> End (vkQueueSubmit)
++  int result = 0;                 // VkResult cast to int
++  uint64_t swapchain_generation = 0;
++};
++
++class State {
++ public:
++  struct Config {
++    int64_t summary_interval_ns = 1'000'000'000;  // one summary line per second
++    int64_t long_submit_ns = 200'000'000;         // "slow" threshold
++    int64_t watchdog_ns = 2'000'000'000;          // "not returned" threshold
++  };
++
++  State() = default;
++  explicit State(const Config& config) : config_(config) {}
++
++  // Presenting thread: begin a present envelope. Returns its id.
++  uint64_t Begin(int64_t now_ns) {
++    const uint64_t id = started_.fetch_add(1, std::memory_order_relaxed) + 1;
++    active_acquire_ns_.store(0, std::memory_order_relaxed);
++    phase_.store(kAcquiring, std::memory_order_relaxed);
++    watchdog_reported_.store(false, std::memory_order_relaxed);
++    active_start_ns_.store(now_ns, std::memory_order_relaxed);
++    active_id_.store(id, std::memory_order_release);
++    return id;
++  }
++
++  // Presenting thread: AcquireQueue returned and holds the queue mutex.
++  void EnterSubmitPhase(int64_t now_ns) {
++    const int64_t start_ns = active_start_ns_.load(std::memory_order_relaxed);
++    active_acquire_ns_.store(now_ns - start_ns, std::memory_order_relaxed);
++    submit_start_ns_.store(now_ns, std::memory_order_relaxed);
++    phase_.store(kSubmitting, std::memory_order_relaxed);
++  }
++
++  // Presenting thread: every return path. Always clears the outstanding
++  // envelope, so a fast (or failed) return is never reported as in flight.
++  void End(uint64_t id, int result, int64_t now_ns) {
++    if (active_id_.load(std::memory_order_acquire) != id) {
++      return;  // stale id: never clear a newer in-flight envelope
++    }
++    const int64_t start_ns = active_start_ns_.load(std::memory_order_relaxed);
++    const bool submitting = phase_.load(std::memory_order_relaxed) == kSubmitting;
++    const int64_t acquire_ns =
++        submitting ? active_acquire_ns_.load(std::memory_order_relaxed) : (now_ns - start_ns);
++    const int64_t submit_ns =
++        submitting ? (now_ns - submit_start_ns_.load(std::memory_order_relaxed)) : 0;
++    const int64_t duration_ns = now_ns - start_ns;
++    const uint64_t swapchain_generation = swapchain_generation_.load(std::memory_order_relaxed);
++
++    UpdateMax(acquire_max_ns_, acquire_ns);
++    UpdateMax(submit_max_ns_, submit_ns);
++    UpdateMax(max_duration_ns_, duration_ns);
++    last_result_.store(result, std::memory_order_relaxed);
++
++    if (duration_ns >= config_.long_submit_ns) {
++      // Remember the most recent slow completion; Tick() decides when to log it.
++      last_slow_id_.store(id, std::memory_order_relaxed);
++      last_slow_duration_ns_.store(duration_ns, std::memory_order_relaxed);
++      last_slow_acquire_ns_.store(acquire_ns, std::memory_order_relaxed);
++      last_slow_submit_ns_.store(submit_ns, std::memory_order_relaxed);
++      last_slow_result_.store(result, std::memory_order_relaxed);
++      last_slow_swapchain_.store(swapchain_generation, std::memory_order_relaxed);
++      slow_count_.fetch_add(1, std::memory_order_relaxed);
++    }
++
++    completed_.fetch_add(1, std::memory_order_relaxed);
++    phase_.store(kIdle, std::memory_order_relaxed);
++    active_id_.store(0, std::memory_order_release);
++    watchdog_reported_.store(false, std::memory_order_relaxed);
++  }
++
++  // Presenting thread: a new swapchain exists. Returns its generation.
++  uint64_t NoteSwapchainCreated() {
++    return swapchain_generation_.fetch_add(1, std::memory_order_relaxed) + 1;
++  }
++
++  Snapshot snapshot(int64_t now_ns) const {
++    Snapshot s;
++    s.started = started_.load(std::memory_order_relaxed);
++    s.completed = completed_.load(std::memory_order_relaxed);
++    s.last_result = last_result_.load(std::memory_order_relaxed);
++    s.max_duration_ns = max_duration_ns_.load(std::memory_order_relaxed);
++    s.active_id = active_id_.load(std::memory_order_acquire);
++    s.swapchain_generation = swapchain_generation_.load(std::memory_order_relaxed);
++    s.acquire_max_ns = acquire_max_ns_.load(std::memory_order_relaxed);
++    s.submit_max_ns = submit_max_ns_.load(std::memory_order_relaxed);
++    s.slow_completed = slow_count_.load(std::memory_order_relaxed);
++    s.in_submit_phase = phase_.load(std::memory_order_relaxed) == kSubmitting;
++    if (s.active_id != 0) {
++      s.active_duration_ns = now_ns - active_start_ns_.load(std::memory_order_relaxed);
++    }
++    return s;
++  }
++
++  // Watchdog thread (or a test). Returns the bounded lines to log now.
++  std::vector<Event> Tick(int64_t now_ns) {
++    std::vector<Event> events;
++
++    // At most one watchdog line per outstanding episode. End() resets the flag,
++    // so a later envelope can report again.
++    const uint64_t active = active_id_.load(std::memory_order_acquire);
++    if (active != 0 && !watchdog_reported_.load(std::memory_order_relaxed)) {
++      const int64_t start_ns = active_start_ns_.load(std::memory_order_relaxed);
++      if (now_ns - start_ns >= config_.watchdog_ns) {
++        watchdog_reported_.store(true, std::memory_order_relaxed);
++        const bool submitting = phase_.load(std::memory_order_relaxed) == kSubmitting;
++        Event event;
++        event.kind = EventKind::kWatchdog;
++        event.id = active;
++        event.duration_ns = now_ns - start_ns;
++        event.acquire_ns = active_acquire_ns_.load(std::memory_order_relaxed);
++        event.submit_ns =
++            submitting ? (now_ns - submit_start_ns_.load(std::memory_order_relaxed)) : 0;
++        event.snapshot = snapshot(now_ns);
++        events.push_back(event);
++      }
++    }
++
++    // At most one long-submit line per interval; repeated slow completions in
++    // the same interval only bump slow_completed (visible in the summary).
++    const uint64_t slow = slow_count_.load(std::memory_order_relaxed);
++    if (slow > slow_reported_.load(std::memory_order_relaxed) &&
++        now_ns - last_slow_report_ns_.load(std::memory_order_relaxed) >=
++            config_.summary_interval_ns) {
++      slow_reported_.store(slow, std::memory_order_relaxed);
++      last_slow_report_ns_.store(now_ns, std::memory_order_relaxed);
++      Event event;
++      event.kind = EventKind::kLongSubmit;
++      event.id = last_slow_id_.load(std::memory_order_relaxed);
++      event.duration_ns = last_slow_duration_ns_.load(std::memory_order_relaxed);
++      event.acquire_ns = last_slow_acquire_ns_.load(std::memory_order_relaxed);
++      event.submit_ns = last_slow_submit_ns_.load(std::memory_order_relaxed);
++      event.result = last_slow_result_.load(std::memory_order_relaxed);
++      event.swapchain_generation = last_slow_swapchain_.load(std::memory_order_relaxed);
++      event.snapshot = snapshot(now_ns);
++      events.push_back(event);
++    }
++
++    // At most one summary per interval.
++    if (now_ns - last_summary_ns_.load(std::memory_order_relaxed) >=
++        config_.summary_interval_ns) {
++      last_summary_ns_.store(now_ns, std::memory_order_relaxed);
++      Event event;
++      event.kind = EventKind::kSummary;
++      event.snapshot = snapshot(now_ns);
++      events.push_back(event);
++    }
++
++    return events;
++  }
++
++ private:
++  enum Phase : int { kIdle = 0, kAcquiring = 1, kSubmitting = 2 };
++
++  static void UpdateMax(std::atomic<int64_t>& target, int64_t value) {
++    int64_t current = target.load(std::memory_order_relaxed);
++    while (value > current &&
++           !target.compare_exchange_weak(current, value, std::memory_order_relaxed)) {
++    }
++  }
++
++  Config config_;
++  std::atomic<uint64_t> started_{0};
++  std::atomic<uint64_t> completed_{0};
++  std::atomic<int64_t> last_result_{0};
++  std::atomic<int64_t> max_duration_ns_{0};
++  std::atomic<uint64_t> active_id_{0};
++  std::atomic<int64_t> active_start_ns_{0};
++  std::atomic<int64_t> active_acquire_ns_{0};
++  std::atomic<int64_t> submit_start_ns_{0};
++  std::atomic<int> phase_{kIdle};
++  std::atomic<uint64_t> swapchain_generation_{0};
++  std::atomic<int64_t> acquire_max_ns_{0};
++  std::atomic<int64_t> submit_max_ns_{0};
++  std::atomic<uint64_t> slow_count_{0};
++  std::atomic<uint64_t> slow_reported_{0};
++  std::atomic<int64_t> last_slow_report_ns_{0};
++  std::atomic<uint64_t> last_slow_id_{0};
++  std::atomic<int64_t> last_slow_duration_ns_{0};
++  std::atomic<int64_t> last_slow_acquire_ns_{0};
++  std::atomic<int64_t> last_slow_submit_ns_{0};
++  std::atomic<int> last_slow_result_{0};
++  std::atomic<uint64_t> last_slow_swapchain_{0};
++  std::atomic<bool> watchdog_reported_{false};
++  std::atomic<int64_t> last_summary_ns_{0};
++};
++
++}  // namespace rex::ui::vulkan::present_diag
+diff --git a/src/ui/vulkan/vulkan_moltenvk.cpp b/src/ui/vulkan/vulkan_moltenvk.cpp
+index e2e2c16..3e55c8e 100644
+--- a/src/ui/vulkan/vulkan_moltenvk.cpp
++++ b/src/ui/vulkan/vulkan_moltenvk.cpp
+@@ -23,6 +23,7 @@
+ #include <system_error>
+ 
+ #include <rex/filesystem.h>
++#include <rex/logging.h>
+ 
+ namespace rex::ui::vulkan {
+ namespace {
+@@ -207,6 +208,26 @@ void ConfigureMacOSVulkanEnvironment(const MacOSVulkanRuntimePaths& paths) {
+       setenv("VK_ICD_FILENAMES", moltenvk_icd.c_str(), 1);
+     }
+   }
++
++  // Opt-in Mac presentation workaround (RESTREET_PRESENT_ASYNC_SUBMIT). MoltenVK
++  // defaults to MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS=1, which encodes a
++  // vkQueueSubmit inline on the calling thread: the Metal drawable is acquired
++  // (and can block in -[CAMetalLayer nextDrawable]) while the caller still holds
++  // the SDK's shared per-queue host-access mutex, which can starve the guest GPU
++  // thread. Setting the variable to 0 moves encoding onto MoltenVK's own
++  // dispatch queue, releasing that mutex as soon as vkQueueSubmit is enqueued.
++  // This is an untested hypothesis, applied only when explicitly requested and
++  // only when the user has not already chosen a value.
++  {
++    const char* requested = std::getenv("RESTREET_PRESENT_ASYNC_SUBMIT");
++    const char* existing = std::getenv("MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS");
++    if (requested && requested[0] && requested[0] != '0' && (!existing || !existing[0])) {
++      setenv("MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS", "0", 1);
++      REXLOG_INFO(
++          "MoltenVK: asynchronous queue submission enabled by RESTREET_PRESENT_ASYNC_SUBMIT "
++          "(MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS=0)");
++    }
++  }
+ }
+ 
+ }  // namespace rex::ui::vulkan
+diff --git a/src/ui/vulkan/vulkan_presenter.cpp b/src/ui/vulkan/vulkan_presenter.cpp
+index d582c50..83ee3dd 100644
+--- a/src/ui/vulkan/vulkan_presenter.cpp
++++ b/src/ui/vulkan/vulkan_presenter.cpp
+@@ -13,11 +13,15 @@
+ #include <atomic>
+ #include <array>
+ #include <chrono>
++#include <condition_variable>
+ #include <cstddef>
+ #include <cstdint>
++#include <cstdlib>
+ #include <cmath>
+ #include <cstring>
+ #include <memory>
++#include <mutex>
++#include <thread>
+ #include <utility>
+ #include <vector>
+ 
+@@ -29,6 +33,8 @@
+ #include <rex/ui/vulkan/presenter.h>
+ #include <rex/ui/vulkan/util.h>
+ 
++#include "present_diag_state.h"
++
+ #if defined(REX_HAS_FIDELITYFX_RUNTIME) && REX_HAS_FIDELITYFX_RUNTIME
+ #include <ffx_api/ffx_api.h>
+ #include <ffx_api/ffx_upscale.h>
+@@ -69,6 +75,139 @@ namespace vulkan {
+ 
+ namespace {
+ 
++#if REX_PLATFORM_MAC
++// Opt-in present-submit diagnostics for the macOS freeze investigation, enabled
++// only when RESTREET_PRESENT_DIAG is set. present_diag_state.h classifies every
++// present envelope (queue-lock wait vs vkQueueSubmit vs outstanding) and this
++// wrapper emits only bounded lines: a once-per-second summary, at most one
++// long-submit line per interval and one watchdog line per outstanding episode.
++// There is no per-submit logging, so a healthy 60 Hz run logs ~1 line/s. The
++// variable is read once; when unset nothing here records or logs or starts a
++// thread (one predictable, cached branch per present).
++bool PresentDiagEnabled() {
++  static const bool enabled = [] {
++    const char* value = std::getenv("RESTREET_PRESENT_DIAG");
++    return value && value[0] && value[0] != '0';
++  }();
++  return enabled;
++}
++
++int64_t PresentDiagNowNs() {
++  return std::chrono::duration_cast<std::chrono::nanoseconds>(
++             std::chrono::steady_clock::now().time_since_epoch())
++      .count();
++}
++
++struct PresentDiagRuntime {
++  present_diag::State state;
++  std::mutex mutex;
++  std::condition_variable wake;
++  std::thread watchdog;
++  std::atomic<bool> stop{false};
++  std::atomic<bool> armed{false};
++
++  ~PresentDiagRuntime() { Stop(); }
++
++  // Idempotent stop+join, safe to call from ~VulkanPresenter and again from the
++  // static destructor. `armed` is cleared only after the join, so it always
++  // means "a live watchdog exists": a presenter rebuilt in the same process
++  // re-arms instead of silently going dark, and a concurrent Ensure() can never
++  // observe armed=true over an already-joined thread.
++  void Stop() {
++    {
++      std::lock_guard<std::mutex> lock(mutex);
++      stop.store(true, std::memory_order_release);
++    }
++    wake.notify_all();
++    if (watchdog.joinable()) {
++      watchdog.join();
++    }
++    armed.store(false, std::memory_order_release);
++  }
++};
++
++PresentDiagRuntime& PresentDiagnostics() {
++  static PresentDiagRuntime runtime;
++  return runtime;
++}
++
++void LogPresentDiagEvent(const present_diag::Event& event) {
++  const present_diag::Snapshot& s = event.snapshot;
++  switch (event.kind) {
++    case present_diag::EventKind::kSummary: {
++      // Distinguishes the three cases at a glance: started == completed with
++      // activeID 0, phase idle and a small maxDuration is the fast-return path;
++      // phase acquire/submit is one outstanding envelope; activeID 0 with a
++      // large maxDuration and a rising slow count is repeated slow submits that
++      // do return.
++      const char* phase = s.active_id == 0 ? "idle" : (s.in_submit_phase ? "submit" : "acquire");
++      REXLOG_INFO(
++          "[PRESENTDIAG] summary started={} completed={} phase={} lastResult={} maxDurationMs={} "
++          "activeID={} activeDurationMs={} swapchainGen={} acquireMaxMs={} submitMaxMs={} "
++          "slow={}",
++          s.started, s.completed, phase, s.last_result, s.max_duration_ns / 1000000, s.active_id,
++          s.active_duration_ns / 1000000, s.swapchain_generation, s.acquire_max_ns / 1000000,
++          s.submit_max_ns / 1000000, s.slow_completed);
++      break;
++    }
++    case present_diag::EventKind::kLongSubmit:
++      REXLOG_WARN(
++          "[PRESENTDIAG] long submit #{} durationMs={} acquireMs={} submitMs={} result={} "
++          "swapchainGen={} (>=200ms; slow total={})",
++          event.id, event.duration_ns / 1000000, event.acquire_ns / 1000000,
++          event.submit_ns / 1000000, event.result, event.swapchain_generation, s.slow_completed);
++      break;
++    case present_diag::EventKind::kWatchdog:
++      REXLOG_WARN(
++          "[PRESENTDIAG] watchdog submit #{} outstanding {} ms phase={} acquireMs={} submitMs={} "
++          "started={} completed={} lastResult={} swapchainGen={} (nothing returned yet)",
++          event.id, event.duration_ns / 1000000, s.in_submit_phase ? "submit" : "acquire",
++          event.acquire_ns / 1000000, event.submit_ns / 1000000, s.started, s.completed,
++          s.last_result, s.swapchain_generation);
++      break;
++    case present_diag::EventKind::kNone:
++      break;
++  }
++}
++
++void PresentDiagWatchdogLoop() {
++  PresentDiagRuntime& runtime = PresentDiagnostics();
++  const auto interval = std::chrono::milliseconds(250);
++  std::unique_lock<std::mutex> lock(runtime.mutex);
++  while (!runtime.stop.load(std::memory_order_acquire)) {
++    runtime.wake.wait_for(lock, interval);
++    if (runtime.stop.load(std::memory_order_acquire)) {
++      break;
++    }
++    // Snapshot under the lock, but log without it so a slow logger never blocks
++    // the presenting thread's EnsurePresentDiagWatchdog().
++    std::vector<present_diag::Event> events = runtime.state.Tick(PresentDiagNowNs());
++    lock.unlock();
++    for (const present_diag::Event& event : events) {
++      LogPresentDiagEvent(event);
++    }
++    lock.lock();
++  }
++}
++
++void EnsurePresentDiagWatchdog() {
++  PresentDiagRuntime& runtime = PresentDiagnostics();
++  if (runtime.armed.load(std::memory_order_acquire)) {
++    return;  // Cheap branch: no lock on the hot path after the first present.
++  }
++  std::lock_guard<std::mutex> lock(runtime.mutex);
++  if (runtime.watchdog.joinable()) {
++    runtime.armed.store(true, std::memory_order_release);
++    return;
++  }
++  runtime.stop.store(false, std::memory_order_release);
++  runtime.watchdog = std::thread(PresentDiagWatchdogLoop);
++  runtime.armed.store(true, std::memory_order_release);
++}
++
++void StopPresentDiagWatchdog() { PresentDiagnostics().Stop(); }
++#endif  // REX_PLATFORM_MAC
++
+ // Observe successfully queued host presents, not physical scanout timestamps.
+ void LogPresentSequence(const void* presenter, uint64_t sequence) {
+   if (!REXCVAR_GET(vulkan_log_present_timing) || !sequence) return;
+@@ -283,6 +422,10 @@ bool VulkanPresenter::PaintContext::Submission::Initialize() {
+ }
+ 
+ VulkanPresenter::~VulkanPresenter() {
++#if REX_PLATFORM_MAC
++  // Join the opt-in watchdog before any presenter/runtime state is destroyed.
++  StopPresentDiagWatchdog();
++#endif
+   // Destroy the swapchain after its images are not used for drawing anymore.
+   // This is a confusing part in Vulkan, as vkQueuePresentKHR doesn't signal a
+   // fence clearly indicating when it's safe to destroy a swapchain, so we
+@@ -1526,6 +1669,16 @@ VkSwapchainKHR VulkanPresenter::PaintContext::CreateSwapchainForVulkanSurface(
+       uint32_t(swapchain_create_info.imageFormat), uint32_t(swapchain_create_info.imageColorSpace),
+       uint32_t(swapchain_create_info.presentMode));
+ 
++#if REX_PLATFORM_MAC
++  if (PresentDiagEnabled()) {
++    const uint64_t generation = PresentDiagnostics().state.NoteSwapchainCreated();
++    REXLOG_INFO("[PRESENTDIAG] swapchain gen {} created {}x{} (old swapchain {})", generation,
++                swapchain_create_info.imageExtent.width,
++                swapchain_create_info.imageExtent.height,
++                old_swapchain != VK_NULL_HANDLE ? "yes" : "no");
++  }
++#endif
++
+   present_queue_family_out = queue_family_index_present;
+   image_format_out = swapchain_create_info.imageFormat;
+   image_extent_out = swapchain_create_info.imageExtent;
+@@ -2354,9 +2507,25 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
+       ui_fence_acquisition = ui_submission_tracker_.AcquireFenceToAdvanceSubmission();
+     }
+     VkResult submit_result;
++#if REX_PLATFORM_MAC
++    // Begin before AcquireQueue so the queue-lock wait is measured separately
++    // from the in-lock vkQueueSubmit. End() below runs on every return path, so
++    // a fast, failed or slow return all clear the outstanding envelope.
++    const bool present_diag_on = PresentDiagEnabled();
++    uint64_t present_diag_id = 0;
++    if (present_diag_on) {
++      EnsurePresentDiagWatchdog();
++      present_diag_id = PresentDiagnostics().state.Begin(PresentDiagNowNs());
++    }
++#endif
+     {
+       const VulkanDevice::Queue::Acquisition queue_acquisition =
+           vulkan_device_->AcquireQueue(vulkan_device_->queue_family_graphics_compute(), 0);
++#if REX_PLATFORM_MAC
++      if (present_diag_on) {
++        PresentDiagnostics().state.EnterSubmitPhase(PresentDiagNowNs());
++      }
++#endif
+       submit_result =
+           dfn.vkQueueSubmit(queue_acquisition.queue(), 1, &submit_info, fence_acqusition.fence());
+       if (ui_fence_acquisition.fence() != VK_NULL_HANDLE && submit_result == VK_SUCCESS) {
+@@ -2366,6 +2535,12 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
+         }
+       }
+     }
++#if REX_PLATFORM_MAC
++    if (present_diag_on) {
++      PresentDiagnostics().state.End(present_diag_id, static_cast<int>(submit_result),
++                                     PresentDiagNowNs());
++    }
++#endif
+     if (submit_result != VK_SUCCESS) {
+       REXLOG_ERROR("VulkanPresenter: Failed to submit command buffers");
+       fence_acqusition.SubmissionFailedOrDropped();

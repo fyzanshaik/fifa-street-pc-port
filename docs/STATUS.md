@@ -1,6 +1,8 @@
 # Validation and known limitations
 
-Last updated: **9 October 2026**, for **ReStreet v1.1** (offline only). This page separates what was tested from what was not.
+Last updated: **10 October 2026** for Mac support. The Windows section retains
+the upstream **9 October 2026 / ReStreet v1.1** validation record. This page
+separates what was tested from what was not.
 
 ## What was tested for v1.1
 
@@ -63,3 +65,30 @@ Output resolution and internal rendering scale are independent. Internal resolut
 ## Development method
 
 SamuelitoDaVila directed and tested the project with AI assistance from ChatGPT, OpenAI Codex and Anthropic's Claude (Claude Code). The statements above separate what was actually tested from what still needs broader coverage.
+
+## macOS source-build preview — 10 October 2026
+
+Apple Silicon is the tested target. The owner reports good gameplay, and the
+latest normal-clock main-menu comparison reports improved music and movement.
+Further performance work is paused to finish install/play reliability and
+controls. This is not a prebuilt Mac release or a claim of sustained 60 FPS.
+
+| Check | Current evidence |
+|---|---|
+| Native arm64 build, `.app`, dependencies and guest dylib loading | Passed on the test MacBook |
+| Manual progress to menu and playable matches | Reported by owner |
+| Latest normal-clock main-menu music / movement | Improved; bounded run exited cleanly |
+| Late new displayed outputs in that menu check | About 24.6/s; not simulation FPS |
+| Keyboard profile | Real MnK fixture checks 25 bindings, releases and simultaneous movement+sprint+pass |
+| Guest clock | Rate defect reproduced before fix; anchored conversion/concurrency/TSAN and public time controls pass |
+| Idle waits, dormant overlays and shader-cache reload | Focused regressions pass; manual comparisons show improvements |
+| Acquire/drawable recovery | Classifier/sync tests and build pass; all live resize/background cases remain unverified |
+| Save/reload, every mode, multiple controllers, long sessions | Not fully verified |
+| Intel Mac | Untested |
+| Agentic model matches / deterministic evaluations | Future work; local control/capture tools are experimental |
+
+Use [BUILDING-MACOS.md](BUILDING-MACOS.md) for installation and
+[CONTROLS-MACOS.md](CONTROLS-MACOS.md) for keys. The single consolidated
+[LOG/PROGRESS.md](../LOG/PROGRESS.md) contains the historical black-screen,
+severe-menu/audio reports, measurements, successful fixes, failed comparisons
+and operating lessons. Original game files and generated guest code stay local.
