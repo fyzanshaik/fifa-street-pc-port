@@ -226,6 +226,15 @@ rules, then integrate decision APIs and run measured comparisons. **No model
 integration, deterministic evaluation environment or end-to-end AI benchmark is
 claimed today.**
 
+The [environment design proposal](docs/AGENT-ENVIRONMENT-DESIGN.md) starts with
+a text/JSON agent against the built-in AI and records the observation, input,
+reset and timing work needed before repeatable evaluations.
+
+Experimental [single-agent input](docs/SINGLE-AGENT-INPUT.md) adds an isolated
+virtual controller for that first experiment. It is verified offline only;
+in-game controller detection, team assignment and gameplay consumption still
+need validation after rebuilding.
+
 ## Documentation
 
 | Guide | Purpose |

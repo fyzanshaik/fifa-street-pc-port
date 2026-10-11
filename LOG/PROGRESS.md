@@ -1,6 +1,6 @@
 # ReStreet macOS — progress, findings and diagnostics
 
-Last updated: 10 October 2026. This is the consolidated engineering record for
+Last updated: 11 October 2026. This is the consolidated engineering record for
 [fyzanshaik's Mac fork](https://github.com/fyzanshaik/fifa-street-pc-port/tree/main)
 of [SamuelitoDaVila's ReStreet](https://github.com/samuelit0davila/fifa-street-pc-port).
 Read this before resuming optimization. The original Windows work and licenses
@@ -686,21 +686,377 @@ is refused. Reproduction and reversal are documented in the
 [Mac guide](../docs/BUILDING-MACOS.md#optional-macos-menu-credit). Raw asset
 previews and cloned archives remain private, never a repository payload.
 
+## Agent environment design — 11 October 2026
+
+**Direction.** The owner opened the agent-environment design track and selected
+a text/JSON LLM against the game's built-in AI as the first playable experiment,
+with video for humans. This is evaluation of a fixed model initially; RL training,
+vision comparisons and AI/AI are later possibilities. Normal-play optimization
+remains paused. Research delegation moved, at the owner's direction, to Codex
+subagents through T3 Code. The framework report completed; the port-feasibility
+task hit a usage limit, so the parent completed the relevant source inspection.
+
+**Findings.** Existing virtual XInput and continuous presenter capture are useful
+seams, not a completed environment. The controller server services one connected
+client at a time, so a persistent broker should own the socket. Capture image and
+metadata replacements are separately atomic, and checksum changes do not count
+simulation ticks. Gameplay field layouts, a coherent state snapshot boundary,
+CPU-opponent assignment, direct match launch and repeatable reset remain unproven.
+The pinned SDK's running `XThread::Save` returns false and its execution restore
+path is unimplemented; subsystem Save/Pause declarations do not establish usable
+game savestates or fixed-tick stepping. This rules out assuming a ready-made
+checkpoint reset shortcut.
+
+**Proposal.** [Agent environment design](../docs/AGENT-ENVIRONMENT-DESIGN.md)
+records repository evidence, current primary framework sources, observation and
+action contracts, live versus controlled-step timing, menu/reset options and
+acceptance gates. Start with a read-only validated gameplay observation probe,
+then a scripted bounded-controller loop, then one supervised JSON-driven LLM
+match. Keep the environment independent of model providers; Pi/LangGraph are
+optional policy runtimes, and Harbor needs a tested native Mac integration and
+reliable episodes before use. Built-in AI determinism is not claimed.
+
+**Evidence and limits.** This was a source/documentation design investigation.
+No application code or stable runtime settings changed; no game was launched,
+input injected, build run or agent match measured. The proposal is not shipped
+environment support. Future game validation remains owner-supervised under the
+repository's operating rules. Failed worker execution is not validation evidence.
+
+## REA and gameplay recovery investigation — 11 October 2026
+
+**Question.** Would REA enable reconstructing the compiled game as modern Mac
+C/C++ and extracting gameplay for the agent environment?
+
+**Findings.** A T3-delegated Codex Plan audit completed; the parent independently
+checked upstream commit `ed1519ddee02739f57136e356786f64c7f74fed0` in a read-only
+temporary checkout. REA wraps decompiler evidence, not an automatic source
+reconstruction pipeline. Its Ghidra bridge labels pseudocode non-source and
+non-compilable. The common target classifier omits PowerPC/XEX and the Ghidra
+adapter enforces an architecture allowlist. Mac ARM64 fixture support does not
+establish original Xbox import support. Generated guest C++ and known guest hooks
+already provide a starting point for targeted semantic recovery.
+
+**Decision proposal.** [REA feasibility](../docs/REA-FEASIBILITY.md) records primary
+sources and a bounded investigation: recover score/clock/phase, then ball and
+controlled-player state; validate observation during owner-driven transitions;
+investigate genuine match start/rematch separately. Exposing gameplay through
+the existing engine and extracting an independent gameplay library have different
+dependency requirements. Whole-engine recovery should not block the first
+JSON-agent-versus-built-in-AI experiment.
+
+**Limits.** Documentation/source research only. No REA installation, application
+changes, build, game launch, input injection or live memory validation. Gameplay
+layouts, compatible Xbox analysis tooling and subsystem isolation remain open.
+
+## Single-agent controller foundation — 11 October 2026
+
+**Scope.** The owner prioritized one tool-controlled player against built-in AI,
+deferring second-controller discovery and multiplayer work. The independent REA
+thread continues separately. A T3-delegated OpenCode task ran with the configured
+official `deepseek/deepseek-flash`; Codex reviewed the changes and evidence.
+
+**Change.** Experimental `RESTREET_CONTROL_MODE=agent-cpu` exposes only virtual
+pad 0 on guest user 0, excludes foreign devices, and rejects commands for slot 1
+without perturbing slot 0. The driver reports non-exposed devices not connected.
+The protocol stays version 1; normal-play opt-in behavior and both older modes
+are preserved. Tests cover mode selection/routing and actual receiver behavior;
+a new CLI fixture checks request encoding against a test-double server. See
+[single-agent input](../docs/SINGLE-AGENT-INPUT.md) for setup and limits.
+
+**Parent validation.** `bash scripts/test-macos-virtual-input.sh` passed the C++
+behavioral checks and Python CLI fixture. `/usr/bin/clang++ -std=gnu++23 -Wall
+-Wextra -fsyntax-only`, using pinned SDK/fmt/spdlog/simde include paths, passed
+for `Installer/recomp-template/src/control_bridge.cpp`. Documentation link checks
+and `git diff --check` passed. A second bounded worker round corrected comments
+that inferred CPU team behavior from an empty input slot; it changed no code.
+
+**Review lesson.** The receiver handles one connected client at a time. A new
+CLI `release` cannot preempt a holding CLI; release must come from the owning
+connection or its disconnect. Documentation now separates adapter presence,
+game controller detection and match configuration. Future agent tools should
+share a persistent broker.
+
+**Remaining evidence.** No host rebuild, game launch, gameplay input or measured
+agent match. The SDK-facing driver was syntax-checked, not runtime-tested; CLI
+wire encoding and real receiver behavior were tested separately. Confirm one
+controller on the selection screen, manual CPU/team setup, movement/pass/shoot
+and release during a later owner-supervised session. Structured observations,
+model integration and repeatable episode setup remain outstanding.
+
+## Credit-profile startup regression — 11 October 2026
+
+**Symptom.** The owner reported startup SIGBUS after the optional credit change.
+Two saved macOS reports (PIDs 5104 and 5513) agree on a main-guest-thread null
+read at host `0x300000000`, with first guest frame `sub_826945B0`. The normal-play
+log records `NtCreateFile` failure for `data/loc/locale.big` immediately before
+the unhandled guest read. That file exists in the original extract. Primitive
+restart warnings also appear in the previous successful long-play log and do
+not identify this regression.
+
+**Cause and feedback loop.** The profile builder linked directories as well as
+files. The pinned POSIX `ListFiles` classifies symlink directories as files from
+`dirent.d_type`; `PopulateEntry` consequently skips their children. Full lazy
+`ResolvePath` can succeed, but the actual open path resolves the parent and
+calls `GetChild` for the leaf, which remains missing. An OpenCode/official
+DeepSeek worker reproduced this using the built runtime against both synthetic
+layouts and the real original/profile trees. The parent independently ran
+`bash scripts/test-macos-credit-vfs.sh`: old layout has `OPENFILE_LEAF NULL`,
+while real-directory layout and fixed synthetic builder output have
+`OPENFILE_LEAF OK`. The probe reproduces the lookup seam; it does not launch a
+guest or establish live startup recovery.
+
+**Minimal fix.** The helper now materializes real directory structure, keeps
+unrelated leaf files linked and preserves the independent patched archive.
+Ancestor directory cycles are refused before publication. Staging, hash gates
+and original-asset immutability are retained. New tests fail against the previous
+builder. Parent validation: `bash scripts/test-macos-credits.sh` passes 95 checks,
+the VFS fixture passes, and `git diff --check` is clean. No SDK or runtime changes
+are needed; the user preferred this narrow fix over removing the optional credit.
+
+**Local repair applied.** A second OpenCode/official DeepSeek round built the new
+private `profile-v3-vfs-fix` from original supported GameData. It contains 18 real
+directories and 105 unrelated leaf-file links, with zero directory symlinks or
+broken leaf targets. Its patched `data1.big` is byte-identical to the prior
+profile; the source comparison still differs by only 5,641 bytes inside the two
+permitted texture ranges. Source archive hashes/mtimes and bundle binary/config
+hashes remain unchanged. Only canonical and installed GameData links changed;
+no rebuild, repackaging or cache/save/settings mutation was needed. Old profiles
+remain available.
+
+**Deployment evidence and lesson.** Parent independently compiled the probe
+against the existing runtime and tested through both deployed bundle links:
+`OPENFILE_LEAF OK`, exit 0; the old profile still yields `OPENFILE_LEAF NULL`,
+exit 1. Parent archive hashes confirm old/new credited output is identical.
+Both `bash scripts/verify-macos-app.sh` checks passed for canonical and installed
+apps. A worker's first `mv` attempt followed a destination directory symlink and
+placed a temporary link inside the old profile; that entry was removed without
+changing bundle links. Final swaps used adjacent staged symlinks plus
+`os.replace`. Parent verified no temporary links remain. This is why link repair
+must use rename semantics rather than a directory-following move command.
+
+**Owner validation.** After the link repair, the owner reported that startup
+works and supplied a screenshot of the press-start screen. The macOS credit
+line is visible beneath the preserved upstream credit. This confirms live
+startup recovery and title-screen credit visibility. Agents did not launch or
+control the game. Main-menu credit visibility and a post-repair match were not
+separately documented by this check; single-agent controller gameplay remains
+unverified.
+
+## Owner-driven gameplay slowdown baseline — 11 October 2026
+
+**Symptom and scope.** The owner reports graphics and audio deteriorating
+10–20 seconds into gameplay, with controls remaining responsive. They explicitly
+authorized the parent to launch the installed app for diagnostics. The existing
+bounded launcher ran with `--frame-diagnostics --seconds 300`, without external
+stack sampling, input injection, configuration edits or builds. The owner drove
+menus and a match, then reported some deterioration and match completion.
+
+**Timing and outcome.** Session `20261011T152259.435263Z` exited 0 after
+300.827 seconds at its announced time limit, without forced-kill escalation.
+The match-start report was recorded approximately 71.452 seconds from launch;
+the combined deterioration/completion report arrived at 314.546 seconds, after
+capture ended. These are report receipt times, not precise gameplay boundaries.
+No exact slowdown onset or result-screen transition was captured. All three
+existing performance/runtime/frame analyzers completed successfully.
+
+**Measurements.** New-output cadence was 19.83/s in fully contained windows
+between launch seconds 75–95, 19.76/s at 95–125, 18.91/s at 125–175 and
+approximately 17.8/s at 175–275. The final 275–297 segment was 14.77/s, with
+unknown gameplay/result phase. These are displayed new outputs, not simulation
+FPS, and the early menus are not a valid smooth-gameplay baseline. RenderThread
+and Main XThread each consumed roughly one CPU core during post-report windows;
+polling/spinning may contribute. Guest fence waits totaled 188.554 seconds wall
+time, versus 0.753 seconds calling-thread CPU, across 106,373 waits. Those
+durations overlap other scopes and do not establish a root cause. Queue-lock
+acquisition totaled 2.183 seconds over the full run; graphics-pipeline creation
+totaled 0.968 seconds and was almost absent after the match-start report.
+
+**Audio and trace limits.** Backend consumption stayed near the nominal
+187.5 guest blocks/s. Only one inserted-silence block (256 frames, 5.33 ms) was
+recorded in the entire run; there were no nonfinite or out-of-range PCM samples.
+This does not prove clean audible playback or explain the owner's audio report.
+The endpoint was earbuds, so other-device comparisons require care. Detailed
+frame points dropped 1,743 records; stage detail reports no drops. Full raw
+traces remain ignored locally. Small sanitized measurements and limitations are
+in [baseline evidence](evidence/20261011-gameplay-slowdown-baseline.json).
+
+**Next discriminating work.** First obtain a matched owner-driven run without
+runtime/GPU probes and with explicit smooth/slow/result phase reports; measurement
+overhead is not controlled by this single trace. Then narrow the existing resolve
+fence path and guest render/main polling before changing synchronization or
+readback. Shader compilation is not supported as the sustained post-report
+cause by this trace. Backend audio starvation is likewise not supported as an
+explanation for persistent audible degradation. No performance fix, proven
+10–20 second onset or causal attribution is claimed.
+
+**Requested redraw/CPU review and graph.** The parent examined the saved trace
+and source paint/overlay decisions, and prepared a five-minute graph of output
+cadence versus host paint calls, process/per-thread CPU, graphics waits, resident
+memory and audio delivery. T3 previews passed at 728 and 360 pixels; actual series
+toggle and cross-series hover checks passed with no narrow-screen overflow.
+The recorded paint calls are 6,447 requested plus six forced; all 6,452 recorded
+UI and toast decisions have continuous repaint false. Cadence logs report only
+six repeated outputs among 6,409 presents. These observations argue against an
+idle-overlay/repeated-presentation redraw storm in this session, with dropped
+point detail retained as a limitation.
+
+Five-second averages over launch seconds 75–125 versus 175–275 put process CPU
+at 271.0% versus 329.0% (100% is one logical CPU). Aggregated job-manager threads
+rise from 47.6% to 89.3%, and GPU Commands from 9.8% to 18.1%. Main/render remain
+near a core each, with possible polling/spinning; these measures do not prove
+whole-machine CPU exhaustion or useful guest work. Guest fence wait wall time
+is about 69.0% versus 66.1% of reporting intervals, so substantial baseline
+waiting does not itself explain the deterioration. All 14,826 recorded long
+guest fence waits carry the Resolve reason, totaling 147.609 seconds; the
+under-1-ms filter excludes many waits from this detail. Resident memory
+fluctuates and falls later; a memory leak is not established. Sanitized evidence
+now includes these values and their units. A separate read-only OpenCode Plan
+audit through T3 completed on official `deepseek/deepseek-flash`, reporting
+execution metadata from its own session. It independently corroborated the
+redraw/CPU/long-resolve-wait findings and checked the publication-to-paint
+coalescing path. The parent accepted the corroborated observations; a small
+principal-submission GPU span is not evidence that whole-frame GPU cost is
+negligible, and unsupported static phase labels or per-output attribution are
+not promoted. No additional run or application change occurred. Next checks
+remain a matched probes-off capture and targeted slow-phase stacks to distinguish
+guest work from polling, with exact owner phase reports.
+
+## Probes-off owner-stopped gameplay comparison — 11 October 2026
+
+**Authorization and collection.** The owner requested a comparison launch with
+no time limit, stopping only on their `done` report; this overrides the usual
+bounded diagnostic duration for this session. A one-off parent orchestration
+command launched the installed app with only the same presentation timing and
+guest-performance CSV flags, recording process CPU/RSS each second. Runtime
+JSONL, detailed GPU timing, external stack sampling, capture and virtual input
+were disabled. No tracked launcher or application code, persisted configuration,
+game data, caches or saves were changed. The runtime JSONL file is absent.
+
+**Phase reports and shutdown.** In session `20261011T154905.520993Z`, match start
+was reported at launch second 71.792 and deterioration at 119.179, about 47.4
+seconds after the start report. The owner later confirmed slowdown began while
+actively playing in the foreground, before switching to chat. `done` arrived at
+238.761 seconds; only then did the collector request graceful termination of
+its owned game process. Actual game exit was 0 after 239.922 seconds, stop reason
+`owner_done`, without escalation. `done` does not mean the match ended.
+
+**Result.** The existing performance analyzer passed on the saved trace. Fully
+contained cadence windows in the first 20 seconds after the match-start report
+average 20.29 new outputs/s (15.084 seconds measured); windows at 45–75 seconds
+average 8.98/s (25.266 seconds measured), and 75–165 seconds remain roughly
+9–10/s. Process CPU averages about 2.64 cores initially and 2.57 cores at 45–75
+seconds, remaining close to 2.6 through most of this slow segment. Thus detailed
+probes are not required to reproduce the symptom, and increasing total CPU
+consumption is not a necessary explanation. The first run's job-manager CPU rise
+remains an observation of that run, not an established slowdown cause.
+
+**Comparison limits and next measurement.** Same installed app/settings and
+earbuds endpoint are confirmed; teams, arena, exact actions, scenes and cache
+state were not matched independently. These two live matches cannot establish
+relative diagnostic overhead or explain why the second slowed more. No detailed
+waits or stacks were captured in the second run. Targeted smooth/slow stacks are
+the next discriminator for useful guest work versus polling and render/readback
+waiting; foreground loss no longer explains onset in this run. Defaults and
+correctness waits remain unchanged. Small sanitized figures and limits are in
+[comparison evidence](evidence/20261011-gameplay-probes-comparison.json). A T3
+comparison graph was prepared from both saved sessions; no new run was launched.
+
+**Focused optimization audit.** A fresh T3-delegated OpenCode Plan task completed
+on official `deepseek/deepseek-flash`, with session metadata checked by the
+worker. It found no evidenced current-path defect. Parent source review confirms
+that Full resolve readback waits for queued GPU work before making copied data
+available to guest memory; removing that wait is not an established correct fix.
+`WAIT_REG_MEM` is a GPU command packet: unmatched values with wait >= `0x100`
+sleep under guest vsync, while shorter waits yield. The measured register-wait
+CPU/wall split supports waiting rather than CPU saturation at this scope, but
+does not classify every individual wait.
+
+The historical October 10 sample identified resolve waits and a guest clock
+polling loop, but was taken before the clock fix and before confirmed gameplay.
+It is useful for recognizing symbols, not a current smooth/slow baseline. Next
+profiling is two owner-marked two-second external samples with runtime/GPU
+probes off. The local `sample` usage output confirms that duration is seconds
+and interval milliseconds; a 10-ms interval is proposed to reduce collection
+frequency. Sampling may disturb playback; sample windows must be excluded from
+cadence comparisons, and useful-work/blocked-time claims must respect sample
+semantics. No samples, new game launch or optimization change occurred during
+the code audit. Owner readiness for a further manual match is pending.
+
+## Full match and performance work paused — 11 October 2026
+
+**Owner direction.** After the third capture, the owner noted that slowdown now
+seems irregular and requested analysis and retained findings while leaving
+optimization aside. Performance tuning is paused. This supersedes the pending
+profiling proposals above; no additional run, sample, tuning change or rebuild
+is scheduled. The game is closed.
+
+**Capture and outcome.** Session `20261011T162009.383667Z` used the same installed
+app/settings with detailed runtime/GPU probes disabled. One external two-second
+sample at a 10-ms interval was taken following match start. The owner played both
+halves, reported that the first half had not deteriorated much, then requested
+closure after game completion. No clear slow-phase report was received, so the
+second planned sample was not taken. Exit 0 after 559.355 seconds on the owner's
+request, without forced-kill escalation. This is a full-match performance
+capture, not complete structured gameplay state or a completed smooth/slow pair.
+
+**Measured behavior.** Excluding sampling-affected windows with a conservative
+five-second margin, launch seconds 100–180 averaged 19.495 new outputs/s;
+180–300 averaged 17.166/s; and 360–520 after the halftime report averaged
+18.426/s. Corresponding mean process CPU was 2.84, 3.24 and 3.37 logical cores.
+The severe sustained 9–10/s regime from the preceding probes-off run did not
+clearly recur. Higher CPU therefore coexisted with better cadence, further
+weakening rising total CPU as a necessary cause. These are owner-marker phase
+proxies with uncontrolled actions/scenes, not a deterministic comparison.
+
+**First sample.** GPU Commands had 159 of 172 wall observations in resolve
+fence/condition waiting and eight in register-wait sleep. Main XThread had 133
+clock-read observations across disjoint branches, with the prominent path reaching
+`mach_absolute_time`; no clock-mutex stall is shown in that path. RenderThread
+was predominantly in recompiled guest rendering work. Four job managers were
+mostly observed in single-object waits. This describes a short relatively stable
+interval and cannot identify what changed during the earlier severe slowdown.
+Wall observations are not CPU percentages. The sample disturbed playback;
+that dip is excluded rather than treated as the reported bug.
+
+**Memory, review and delivery.** RSS was non-monotonic, peaked at 743.828 MiB
+over the entire capture and ended at 426.281 MiB. The sample's physical footprint
+`2.3G` is separate accounting; neither metric establishes a leak. A fresh
+read-only OpenCode Plan audit on official `deepseek/deepseek-flash` completed,
+and the parent independently checked accepted numbers and stack branches.
+The existing performance analyzer passed; documentation links, JSON parsing
+and `git diff --check` were checked. Consolidated observations, non-claims and
+provenance are in [gameplay findings](../docs/MACOS-GAMEPLAY-PERFORMANCE-FINDINGS.md)
+and [small sanitized evidence](evidence/20261011-full-match-performance.json).
+No code defect or optimization fix is claimed. Raw traces and sample paths stay
+ignored locally; no original game material or generated code is published.
+
+## Git delivery validation — 11 October 2026
+
+At the owner's request to commit and push the pending checkout changes, the
+parent reran the credit fixtures (95 checks), runtime-backed old/new/built-profile
+VFS regression, virtual-controller behavioral tests, CLI wire-format fixture and
+SDK-facing controller syntax check; all passed. JSON parsing, 70 local document
+links, publication checks for private paths/credential patterns/binary content
+and `git diff --check` passed. Raw diagnostics, generated code and original game
+data remain ignored. The independent REA worktree is kept separate. No new build
+or gameplay validation was performed; single-agent input remains experimental
+and performance optimization remains paused.
+
 ## Next work
 
 - Use the installed app for a manual match, then validate save/reload, longer
   sessions, additional modes and physical controllers when useful to the owner.
 - Keep canonical build/package/install checks as the delivery gate; preserve
   normal-clock and presentation settings for both terminal and Finder launches.
-- Evaluate the newer upstream adaptive `Some` readback in a separate controlled
-  Mac comparison. Windows improvements remain available in their own patch;
-  Mac currently preserves its tested `Full` readback stack. Never force-push
-  `main` or treat Windows results as MoltenVK validation.
-- Resume optimization only when useful. Profile the remaining RenderThread/resolve
-  work before changing correctness waits, guest time or readback semantics.
-- For agentic benchmarks, define observation/action cadence, latency budget,
-  controlled scenarios, reset lifecycle, scoring, model adapters and reporting,
-  then prove real human/AI and AI/AI matches before claiming completed support.
+- Performance optimization is paused at the owner's request. Preserve the tested
+  `Full` readback stack and retained findings. Any future evaluation of upstream
+  adaptive `Some` readback needs a separate controlled Mac comparison; Windows
+  results are not MoltenVK validation. Profile RenderThread/resolve work before
+  changing correctness waits, guest time or readback semantics.
+- For agentic benchmarks, follow the proposed
+  [observation/action/reset acceptance gates](../docs/AGENT-ENVIRONMENT-DESIGN.md#10-first-implementation-milestone-and-acceptance-gates).
+  Validate structured gameplay fields and one JSON-agent-versus-built-in-AI match
+  before expanding to unattended reset, controlled stepping or AI/AI.
 
 See [AGENTS.md](../AGENTS.md) for exact operations and coordination rules. No
 remaining frame-rate, full-mode or AI-evaluation guarantee is implied by this log.

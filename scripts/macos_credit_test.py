@@ -108,6 +108,14 @@ def make_source(path, specs):
         handle.write(b"index")
     with open(os.path.join(path, "default.xex"), "wb") as handle:
         handle.write(b"xex")
+    # Nested real directories, so the profile layout can be exercised the way
+    # the runtime walks it (the regression is directories symlinked as files).
+    for sub in ("data/loc", "dlc/pack", "$SystemUpdate"):
+        os.makedirs(os.path.join(path, sub), exist_ok=True)
+    with open(os.path.join(path, "data", "loc", "locale.big"), "wb") as handle:
+        handle.write(b"locale-bytes" * 4096)
+    with open(os.path.join(path, "dlc", "pack", "pack.big"), "wb") as handle:
+        handle.write(b"dlc-pack-bytes")
     return targets
 
 
@@ -342,14 +350,18 @@ def test_profile_lifecycle():
             message = mcp.build_profile(source, dest)
             check("Built" in message, "build reports success")
             check(mcp.is_valid_profile(dest), "profile marker is valid")
-            # Unrelated entries are symlinks; data1.big is a real, edited clone.
+            # Real directories, symlinked files; data1.big is a real cloned file.
             for name in os.listdir(source):
+                src = os.path.join(source, name)
+                out = os.path.join(dest, name)
                 if name == "data1.big":
-                    check(not os.path.islink(os.path.join(dest, name)),
+                    check(not os.path.islink(out) and os.path.isfile(out),
                           "profile data1.big is a real file")
+                elif os.path.isdir(src):
+                    check(os.path.isdir(out) and not os.path.islink(out),
+                          f"profile {name} is a real directory")
                 else:
-                    check(os.path.islink(os.path.join(dest, name)),
-                          f"profile {name} is a symlink")
+                    check(os.path.islink(out), f"profile {name} is a symlink")
             after = open(os.path.join(source, "data1.big"), "rb").read()
             check(after == before, "source data1.big is untouched")
             built = open(os.path.join(dest, "data1.big"), "rb").read()
@@ -364,6 +376,69 @@ def test_profile_lifecycle():
             # A profile that has already been built is a valid destination.
             marker = json.load(open(mcp.profile_marker(dest)))
             check(marker["version"] == mcp.PROFILE_VERSION, "marker version")
+
+
+def _check_file_link(src, dst, rel):
+    check(os.path.islink(dst), f"profile {rel} is a symlink")
+    check(os.path.realpath(dst) == os.path.realpath(src),
+          f"profile {rel} points at the original")
+    with open(src, "rb") as original, open(dst, "rb") as linked:
+        check(linked.read() == original.read(), f"profile {rel} bytes match")
+
+
+def _check_directory_mirror(src_dir, dst_dir, rel):
+    check(os.path.isdir(dst_dir) and not os.path.islink(dst_dir),
+          f"profile {rel} is a real directory")
+    for name in sorted(os.listdir(src_dir)):
+        src = os.path.join(src_dir, name)
+        dst = os.path.join(dst_dir, name)
+        if os.path.isdir(src):
+            _check_directory_mirror(src, dst, os.path.join(rel, name))
+        else:
+            _check_file_link(src, dst, os.path.join(rel, name))
+
+
+def test_profile_materializes_nested_directories():
+    with tempfile.TemporaryDirectory() as tmp:
+        source = os.path.join(tmp, "GameData")
+        targets = make_source(source, DEFAULT_SPECS)
+        # A benign directory symlink (a sibling subtree, not an ancestor) must
+        # be followed and materialized too, so its contents stay reachable.
+        os.symlink(os.path.join(source, "data", "loc"), os.path.join(source, "alias"))
+        dest = os.path.join(tmp, "profile-v2")
+        with with_targets(targets):
+            mcp.build_profile(source, dest)
+            check(not os.path.islink(os.path.join(dest, "data1.big")),
+                  "data1.big is a real cloned file")
+            for name in sorted(os.listdir(source)):
+                if name == "data1.big":
+                    continue
+                src = os.path.join(source, name)
+                dst = os.path.join(dest, name)
+                if os.path.isdir(src):
+                    _check_directory_mirror(src, dst, name)
+                else:
+                    _check_file_link(src, dst, name)
+            check(os.path.isfile(os.path.join(dest, "data", "loc", "locale.big")),
+                  "nested locale.big is present through the profile")
+
+
+def test_profile_refuses_directory_cycle():
+    with tempfile.TemporaryDirectory() as tmp:
+        source = os.path.join(tmp, "GameData")
+        targets = make_source(source, DEFAULT_SPECS)
+        # A symlink back to an ancestor would recurse forever.
+        os.symlink(source, os.path.join(source, "data", "self"))
+        dest = os.path.join(tmp, "profile")
+        with with_targets(targets):
+            try:
+                mcp.build_profile(source, dest)
+                raise AssertionError("directory cycle accepted")
+            except mcp.CreditPatchError:
+                check(True, "directory cycle refused")
+            check(not os.path.exists(dest), "no profile left after cycle refusal")
+            stray = [n for n in os.listdir(tmp) if n.startswith(".macos-credits")]
+            check(not stray, "no staging left after cycle refusal")
 
 
 def test_no_mutation_on_check_and_dry_run():
@@ -475,6 +550,8 @@ def main():
     test_tiling_matches_sdk_reference()
     test_patch_only_touches_mask_blocks()
     test_profile_lifecycle()
+    test_profile_materializes_nested_directories()
+    test_profile_refuses_directory_cycle()
     test_no_mutation_on_check_and_dry_run()
     test_refuses_unsafe_destinations()
     test_second_target_failure_leaves_everything()

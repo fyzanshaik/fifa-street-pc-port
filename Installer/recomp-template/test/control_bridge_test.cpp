@@ -225,6 +225,31 @@ void TestProtocol() {
   CHECK_EQ(decoded_response.packet, 0x11223344u);
 }
 
+void TestModeNames() {
+  // Unset, empty or unrecognised text keeps the historical isolated default.
+  CHECK(ctl::ModeFromName(nullptr) == ctl::Mode::kAiAi);
+  CHECK(ctl::ModeFromName("") == ctl::Mode::kAiAi);
+  CHECK(ctl::ModeFromName("ai-ai") == ctl::Mode::kAiAi);
+  CHECK(ctl::ModeFromName("human-ai") == ctl::Mode::kHumanAi);
+  CHECK(ctl::ModeFromName("agent-cpu") == ctl::Mode::kAgentCpu);
+  CHECK(ctl::ModeFromName("cpu") == ctl::Mode::kAiAi);
+  CHECK(ctl::ModeFromName("AGENT-CPU") == ctl::Mode::kAiAi);
+  CHECK(ctl::ModeFromName("agent-cpu ") == ctl::Mode::kAiAi);
+
+  CHECK_EQ(std::string(ctl::ModeName(ctl::Mode::kAiAi)), std::string("ai-ai"));
+  CHECK_EQ(std::string(ctl::ModeName(ctl::Mode::kHumanAi)), std::string("human-ai"));
+  CHECK_EQ(std::string(ctl::ModeName(ctl::Mode::kAgentCpu)), std::string("agent-cpu"));
+
+  // Presence: agent-cpu exposes exactly one pad, and it is pad 0.
+  CHECK(ctl::PlayerBridged(ctl::Mode::kAgentCpu, 0));
+  CHECK(!ctl::PlayerBridged(ctl::Mode::kAgentCpu, 1));
+  CHECK(!ctl::PlayerBridged(ctl::Mode::kAgentCpu, 2));
+  CHECK(ctl::PlayerBridged(ctl::Mode::kAiAi, 0));
+  CHECK(ctl::PlayerBridged(ctl::Mode::kAiAi, 1));
+  CHECK(!ctl::PlayerBridged(ctl::Mode::kHumanAi, 0));
+  CHECK(ctl::PlayerBridged(ctl::Mode::kHumanAi, 1));
+}
+
 void TestPadState() {
   ctl::PadState pad;
   pad.Press(0x1000, 100, /*now_ms=*/0, /*owner=*/1);
@@ -344,6 +369,23 @@ void TestAssignmentRouting() {
       CHECK(id != virtual0.id);
       CHECK(id != virtual1.id);
     }
+  }
+
+  {
+    ctl::VirtualPadAssignment assignment(ctl::Mode::kAgentCpu);
+    assignment.OnDevicesChanged(devices);
+    std::vector<DeviceId> user0;
+    std::vector<DeviceId> user1;
+    std::vector<DeviceId> user2;
+    assignment.DevicesForUser(0, user0);
+    assignment.DevicesForUser(1, user1);
+    assignment.DevicesForUser(2, user2);
+    // Only the agent's own pad on user 0: no virtual pad 1, and no foreign
+    // physical/keyboard contamination of the CPU's side.
+    CHECK_EQ(user0.size(), 1u);
+    CHECK(user0.size() == 1 && user0[0] == virtual0.id);
+    CHECK(user1.empty());
+    CHECK(user2.empty());
   }
 }
 
@@ -523,15 +565,83 @@ void TestHumanAiMode() {
   ::rmdir(dir.c_str());
 }
 
+void TestAgentCpuMode() {
+  const std::string dir = MakeTempDir();
+  const std::string path = dir + "/ctl.sock";
+
+  ctl::ControlBridgeServer server;
+  std::string error;
+  CHECK(server.Start(path, ctl::Mode::kAgentCpu, &error) ==
+        ctl::ControlBridgeServer::StartResult::kOk);
+  CHECK(server.mode() == ctl::Mode::kAgentCpu);
+
+  TestClient client(path);
+  CHECK(client.connected());
+
+  // The one bridged slot accepts a full bounded sample: buttons, triggers and
+  // all four stick axes survive the socket round trip unchanged.
+  ctl::Request state = MakeRequest(ctl::Command::kSetState, 0);
+  state.sample.buttons = 0x1000 | 0x4000;  // A + X
+  state.sample.left_trigger = 0x7F;
+  state.sample.right_trigger = 0xFF;
+  state.sample.thumb_lx = 32767;
+  state.sample.thumb_ly = -32768;
+  state.sample.thumb_rx = 12345;
+  state.sample.thumb_ry = -12345;
+  state.hold_ms = 500;
+  ctl::Response response;
+  CHECK(client.Send(state, &response) == ctl::Status::kOk);
+  CHECK_EQ(response.sample.buttons, 0x5000);
+  ctl::PadSample read = server.Read(0, ctl::ControlBridgeServer::NowMs()).sample;
+  CHECK_EQ(read.buttons, 0x5000);
+  CHECK_EQ(read.left_trigger, 0x7F);
+  CHECK_EQ(read.right_trigger, 0xFF);
+  CHECK_EQ(read.thumb_lx, 32767);
+  CHECK_EQ(read.thumb_ly, -32768);
+  CHECK_EQ(read.thumb_rx, 12345);
+  CHECK_EQ(read.thumb_ry, -12345);
+
+  // The unavailable second slot is rejected, and the refusal does not perturb
+  // the active slot or leave any state on the rejected one.
+  ctl::Request press1 = MakeRequest(ctl::Command::kPress, 1);
+  press1.sample.buttons = 0x0010;
+  press1.hold_ms = 1000;
+  CHECK(client.Send(press1, &response) == ctl::Status::kPlayerNotBridged);
+  CHECK_EQ(response.player, 1);
+  CHECK(ctl::IsNeutral(server.Read(1, ctl::ControlBridgeServer::NowMs()).sample));
+  CHECK_EQ(server.Read(0, ctl::ControlBridgeServer::NowMs()).sample.buttons, 0x5000);
+
+  // An explicit release on the active slot clears it immediately.
+  ctl::Request release = MakeRequest(ctl::Command::kRelease, 0);
+  release.sample.buttons = 0;
+  CHECK(client.Send(release, &response) == ctl::Status::kOk);
+  CHECK(ctl::IsNeutral(server.Read(0, ctl::ControlBridgeServer::NowMs()).sample));
+
+  // Disconnecting still releases a held command (connection-scoped lifetime).
+  ctl::Request held = MakeRequest(ctl::Command::kPress, 0);
+  held.sample.buttons = 0x2000;  // B
+  held.hold_ms = 0;              // hold until released / disconnect
+  CHECK(client.Send(held) == ctl::Status::kOk);
+  CHECK_EQ(server.Read(0, ctl::ControlBridgeServer::NowMs()).sample.buttons, 0x2000);
+  client.Close();
+  CHECK(WaitForNeutral(server, 0, 2000));
+  CHECK(ctl::IsNeutral(server.Read(1, ctl::ControlBridgeServer::NowMs()).sample));
+
+  server.Stop();
+  ::rmdir(dir.c_str());
+}
+
 }  // namespace
 
 int main() {
   TestProtocol();
+  TestModeNames();
   TestPadState();
   TestGuestStateEndianness();
   TestAssignmentRouting();
   TestServerLifecycle();
   TestHumanAiMode();
+  TestAgentCpuMode();
 
   if (g_failures == 0) {
     std::printf("All virtual-gamepad bridge behavioral tests passed\n");

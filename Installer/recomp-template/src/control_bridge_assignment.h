@@ -10,6 +10,9 @@
 //   human-ai : virtual pad 1 is routed to user 1; the remaining devices follow
 //              the SDK default (synthetic -> user 0, physical by ordinal), so
 //              normal physical/keyboard play on user 0 is unchanged.
+//   agent-cpu: exactly like ai-ai, but only virtual pad 0 exists, so this policy
+//              assigns no device to guest user 1. Team/CPU setup remains game
+//              configuration and is unverified here.
 //
 // Only the fmt-free SDK input headers are used, so this file unit-tests without
 // the ReXGlue runtime library.

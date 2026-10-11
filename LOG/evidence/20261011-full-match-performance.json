@@ -1,0 +1,210 @@
+{
+  "date": "2026-10-11",
+  "status": "optimization paused at owner request; findings retained",
+  "capture": {
+    "session": "20261011T162009.383667Z",
+    "runtime_diagnostics": false,
+    "gpu_diagnostics": false,
+    "scheduled_stack_sampling": false,
+    "manual_stack_sample_count": 1,
+    "input": "owner driven; no injection",
+    "audio_endpoint_kind": "earbuds; six-channel 48 kHz",
+    "runtime_settings": "inherited validated installed-app defaults"
+  },
+  "summary": {
+    "session": "20261011T162009.383667Z",
+    "exit": {
+      "pid": 46281,
+      "exit_code": 0,
+      "stop_reason": "owner_done",
+      "shutdown_escalated": false,
+      "elapsed_seconds": 559.355
+    },
+    "sample_exclusion_s": [
+      83.432,
+      96.243
+    ],
+    "windows": [
+      {
+        "label": "pre_sample_gameplay",
+        "range_from_launch_s": [
+          73,
+          88.432
+        ],
+        "cadence_measured_s": 5.016,
+        "cadence_windows": 1,
+        "new_outputs_per_s": 19.936,
+        "median_of_window_median_output_gap_ms": 50.013,
+        "repeated_outputs": 0,
+        "cpu_percent_mean": 264.89,
+        "rss_mib_median": 633.562,
+        "rss_mib_min": 579.266,
+        "rss_mib_max": 683.281
+      },
+      {
+        "label": "early_first_half_proxy",
+        "range_from_launch_s": [
+          100,
+          180
+        ],
+        "cadence_measured_s": 75.301,
+        "cadence_windows": 15,
+        "new_outputs_per_s": 19.495,
+        "median_of_window_median_output_gap_ms": 50.076,
+        "repeated_outputs": 0,
+        "cpu_percent_mean": 284.444,
+        "rss_mib_median": 639.344,
+        "rss_mib_min": 598.047,
+        "rss_mib_max": 683.344
+      },
+      {
+        "label": "later_first_half_proxy",
+        "range_from_launch_s": [
+          180,
+          300
+        ],
+        "cadence_measured_s": 115.75,
+        "cadence_windows": 23,
+        "new_outputs_per_s": 17.166,
+        "median_of_window_median_output_gap_ms": 50.21,
+        "repeated_outputs": 0,
+        "cpu_percent_mean": 323.816,
+        "rss_mib_median": 669.672,
+        "rss_mib_min": 599.141,
+        "rss_mib_max": 719.297
+      },
+      {
+        "label": "after_halftime_report_proxy",
+        "range_from_launch_s": [
+          360,
+          520
+        ],
+        "cadence_measured_s": 155.816,
+        "cadence_windows": 31,
+        "new_outputs_per_s": 18.426,
+        "median_of_window_median_output_gap_ms": 50.254,
+        "repeated_outputs": 1,
+        "cpu_percent_mean": 336.511,
+        "rss_mib_median": 627.594,
+        "rss_mib_min": 437.328,
+        "rss_mib_max": 654.688
+      },
+      {
+        "label": "late_unclassified_phase",
+        "range_from_launch_s": [
+          520,
+          558.264
+        ],
+        "cadence_measured_s": 30.189,
+        "cadence_windows": 6,
+        "new_outputs_per_s": 17.424,
+        "median_of_window_median_output_gap_ms": 49.9325,
+        "repeated_outputs": 0,
+        "cpu_percent_mean": 278.947,
+        "rss_mib_median": 653.594,
+        "rss_mib_min": 426.281,
+        "rss_mib_max": 690.406
+      },
+      {
+        "label": "all_after_match_report_mixed_phases",
+        "range_from_launch_s": [
+          68.288,
+          558.264
+        ],
+        "cadence_measured_s": 467.407,
+        "cadence_windows": 93,
+        "new_outputs_per_s": 18.329,
+        "median_of_window_median_output_gap_ms": 50.178,
+        "repeated_outputs": 2,
+        "cpu_percent_mean": 313.838,
+        "rss_mib_median": 641.609,
+        "rss_mib_min": 358.672,
+        "rss_mib_max": 719.297
+      }
+    ],
+    "whole_run_cpu_percent_max": 391.2,
+    "whole_run_rss_mib_max": 743.828,
+    "whole_run_rss_mib_final": 426.281,
+    "cadence_total_repeats": 6,
+    "sample_present": true,
+    "slow_sample_present": false
+  },
+  "owner_markers": [
+    {
+      "event": "owner_match_started_report",
+      "received_at_utc": "2026-10-11T16:21:17.671719+00:00",
+      "elapsed_seconds_approx": 68.288,
+      "note": "Owner report receipt; smooth sample planned after brief return-to-game delay. Match start does not independently confirm smooth playback."
+    },
+    {
+      "event": "external_stack_sample",
+      "phase": "candidate_smooth",
+      "pid": 46281,
+      "duration_requested_s": 2,
+      "interval_ms": 10,
+      "started_at_utc": "2026-10-11T16:21:37.815361+00:00",
+      "ended_at_utc": "2026-10-11T16:21:40.626184+00:00",
+      "command_start_elapsed_s": 88.432,
+      "command_end_elapsed_s": 91.243,
+      "tool_exit_code": 0,
+      "file": "sample-smooth.txt",
+      "bytes": 460365,
+      "note": "Phase inferred from recent owner match-start report; inspect pre-sample cadence. Tool interval includes setup/symbolization, not exact stack collection alone. Playback may be disturbed."
+    },
+    {
+      "event": "owner_halftime_and_new_half_report",
+      "received_at_utc": "2026-10-11T16:25:56.984993+00:00",
+      "elapsed_seconds_approx": 347.601,
+      "note": "Owner: first half over; gameplay did not deteriorate that much; starting new half. Not an exact half-transition boundary and not a slow-phase trigger."
+    },
+    {
+      "event": "owner_game_done_close_report",
+      "received_at_utc": "2026-10-11T16:29:27.647693+00:00",
+      "elapsed_seconds_approx": 558.264,
+      "note": "Owner says game done and explicitly requests app close. No clear slow-phase sampling trigger received."
+    }
+  ],
+  "stack_summary": {
+    "observation_kind": "wall stack observations, not CPU percentage; nested counts overlap",
+    "observations_per_named_thread": 172,
+    "gpu_resolve_fence_wait_observations": 159,
+    "gpu_register_wait_sleep_observations": 8,
+    "main_guest_clock_read_observations_disjoint_branches": [
+      127,
+      6
+    ],
+    "render_thread": "predominantly recompiled guest rendering work",
+    "job_manager_single_object_wait_observations": [
+      165,
+      167,
+      169,
+      128
+    ],
+    "reported_physical_footprint": "2.3G",
+    "physical_footprint_note": "Single sample-reported value; different accounting from ps RSS; not a leak test."
+  },
+  "observations": [
+    "Owner completed both halves and did not clearly report the earlier severe deterioration.",
+    "No slow-phase sampling trigger, so no smooth/slow stack pair was completed.",
+    "Severe sustained 9\u201310 new outputs/s regime did not clearly recur in this run.",
+    "Higher CPU consumption coexisted with better output cadence than the severely slow probes-off run; rising total CPU is not necessary to reproduce the symptom.",
+    "Graphics completion waiting and main-thread clock polling were sampled during relatively stable gameplay.",
+    "Sampling visibly disturbed playback; contaminated cadence windows excluded with a five-second margin."
+  ],
+  "limits": [
+    "Owner reports are approximate receipt times, not exact simulation boundaries.",
+    "Post-start aggregate mixes gameplay, halftime, pauses/replays/results and unclassified transitions.",
+    "Match teams/arena/actions/scenes/cache were not independently controlled.",
+    "New-output cadence is not simulation FPS.",
+    "No detailed runtime audio or GPU counter measurements were collected in this run.",
+    "Stack observations include blocked threads and are not CPU percentages.",
+    "No confirmed root cause, performance fix, deterministic benchmark or complete gameplay-state observation."
+  ],
+  "review": {
+    "provider": "OpenCode official DeepSeek",
+    "model": "deepseek/deepseek-flash",
+    "agent": "Plan",
+    "changes": "read-only report; parent owns docs and sanitized evidence"
+  },
+  "delivery": "documentation and small sanitized evidence only; raw traces remain ignored locally"
+}

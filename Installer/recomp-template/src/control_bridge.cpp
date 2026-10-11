@@ -22,15 +22,6 @@ namespace restreet::control {
 
 namespace {
 
-Mode ParseMode(const char* value) {
-  // Default to the fully-isolated evaluation mode; only an explicit human-ai
-  // request enables the physical pass-through.
-  if (value != nullptr && std::strcmp(value, "human-ai") == 0) {
-    return Mode::kHumanAi;
-  }
-  return Mode::kAiAi;
-}
-
 void AttachVirtualPads(rex::system::IInputSystem* system, const std::string& socket_path,
                        Mode mode) {
   if (system == nullptr) {
@@ -63,10 +54,16 @@ VirtualPadDriver::VirtualPadDriver(std::unique_ptr<ControlBridgeServer> server)
 X_STATUS VirtualPadDriver::Setup() { return X_STATUS_SUCCESS; }
 
 int VirtualPadDriver::PlayerFor(rex::input::DeviceId id) const {
+  if (server_ == nullptr) {
+    return -1;
+  }
   for (int player = 0; player < kPlayerCount; ++player) {
-    if (id == static_cast<rex::input::DeviceId>(DeviceIdForPlayer(player))) {
-      return player;
+    if (id != static_cast<rex::input::DeviceId>(DeviceIdForPlayer(player))) {
+      continue;
     }
+    // A pad that this mode does not expose is reported not connected, matching
+    // EnumerateDevices, so presence and routing cannot disagree.
+    return PlayerBridged(server_->mode(), player) ? player : -1;
   }
   return -1;
 }
@@ -152,7 +149,7 @@ void InstallControlBridge(rex::RuntimeConfig& config) {
     return;  // Opt-in off: the default factory is left byte-for-byte untouched.
   }
   const std::string socket_path = socket_env;
-  const Mode mode = ParseMode(std::getenv("RESTREET_CONTROL_MODE"));
+  const Mode mode = ModeFromName(std::getenv("RESTREET_CONTROL_MODE"));
 
   auto base = config.input_factory;
   config.input_factory = [base, socket_path, mode](

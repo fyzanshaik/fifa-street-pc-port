@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
 # test-macos-virtual-input.sh - compile and run the behavioral test for the
-# macOS virtual-gamepad bridge.
+# macOS virtual-gamepad bridge, then the offline CLI wire-format fixture.
 #
 # The test drives the real control protocol codec, the latching pad state, the
 # slot-routing device-assignment policy and the POSIX receiver server over a
 # live Unix-domain socket. It needs only a C++ compiler and the SDK's public
 # headers (for rex::input::X_INPUT_STATE); no ReXGlue runtime library, GPU or
-# generated guest code is used.
+# generated guest code is used. The CLI fixture needs only python3.
 #
 # Usage: scripts/test-macos-virtual-input.sh
 #
@@ -37,3 +37,13 @@ echo ">>> Running virtual-gamepad bridge behavioral test..."
 "${BUILD_DIR}/control_bridge_test"
 
 echo "OK   virtual-gamepad bridge behavioral tests passed"
+
+# The CLI test needs no SDK or compiler, only python3: skip it loudly rather
+# than fail the whole script on a machine without it.
+CLI_TEST="${ROOT}/scripts/test-macos-gamepad-cli.py"
+if command -v python3 >/dev/null 2>&1; then
+  echo ">>> Running gamepad CLI wire-format fixture..."
+  python3 "${CLI_TEST}"
+else
+  echo "SKIP gamepad CLI wire-format fixture: python3 not found" >&2
+fi

@@ -1,0 +1,265 @@
+{
+  "session": "20261011T152259.435263Z",
+  "date": "2026-10-11",
+  "machine_gpu": "Apple M5",
+  "app": "installed macOS app",
+  "sdk_pin": "c94f5ebdcb3c9d1a460ca48e04f9758448f8d518",
+  "collection": {
+    "duration_limit_s": 300,
+    "frame_diagnostics": true,
+    "runtime_diagnostics": true,
+    "external_stack_sample": false,
+    "virtual_input": false,
+    "frame_capture": false,
+    "gameplay": "owner driven",
+    "audio_device_kind": "earbuds",
+    "audio_channels": 6,
+    "audio_rate_hz": 48000,
+    "runtime_setting_overrides": false
+  },
+  "exit": {
+    "pid": 21389,
+    "exit_code": 0,
+    "stop_reason": "time_limit",
+    "shutdown_escalated": false,
+    "elapsed_seconds": 300.827
+  },
+  "owner_reports": [
+    {
+      "event": "owner_match_started_report",
+      "received_at_utc": "2026-10-11T15:24:10.887569+00:00",
+      "elapsed_seconds_approx": 71.452,
+      "note": "Owner report receipt, not an exact simulation boundary."
+    },
+    {
+      "event": "owner_deteriorated_and_match_finished_report",
+      "received_at_utc": "2026-10-11T15:28:13.981239+00:00",
+      "elapsed_seconds_approx": 314.546,
+      "note": "Owner says deteriorated a bit and match finished; receipt time only, onset and match-end times unspecified."
+    }
+  ],
+  "cadence_windows": [
+    {
+      "range_from_launch_s": [
+        75,
+        95
+      ],
+      "cadence_measured_s": 15.132,
+      "observed_new_outputs_per_s": 19.826,
+      "median_of_window_median_output_gap_ms": 50.075
+    },
+    {
+      "range_from_launch_s": [
+        95,
+        125
+      ],
+      "cadence_measured_s": 25.098,
+      "observed_new_outputs_per_s": 19.763,
+      "median_of_window_median_output_gap_ms": 50.081
+    },
+    {
+      "range_from_launch_s": [
+        125,
+        175
+      ],
+      "cadence_measured_s": 45.217,
+      "observed_new_outputs_per_s": 18.909,
+      "median_of_window_median_output_gap_ms": 49.998
+    },
+    {
+      "range_from_launch_s": [
+        175,
+        225
+      ],
+      "cadence_measured_s": 45.267,
+      "observed_new_outputs_per_s": 17.783,
+      "median_of_window_median_output_gap_ms": 50.517
+    },
+    {
+      "range_from_launch_s": [
+        225,
+        275
+      ],
+      "cadence_measured_s": 45.232,
+      "observed_new_outputs_per_s": 17.797,
+      "median_of_window_median_output_gap_ms": 50.39
+    },
+    {
+      "range_from_launch_s": [
+        275,
+        297
+      ],
+      "cadence_measured_s": 15.099,
+      "observed_new_outputs_per_s": 14.769,
+      "median_of_window_median_output_gap_ms": 65.627
+    }
+  ],
+  "audio": {
+    "submitted_blocks": 55691,
+    "consumed_blocks": 55683,
+    "inserted_silence_frames": 256,
+    "inserted_silence_fraction": 1.7958479994253288e-05,
+    "submit_gap_max_ms": 32.27,
+    "callback_gap_max_ms": 23.504,
+    "callback_duration_max_ms": 0.296,
+    "nominal_device_chunk_ms": 21.333333333333332,
+    "silent_pcm_blocks": 5013,
+    "nonzero_repeated_lag1": 146,
+    "nonzero_repeated_lag4": 139,
+    "pcm_samples": 85541376,
+    "pcm_nonfinite_samples": 0,
+    "pcm_out_of_range_samples": 0,
+    "source_pcm_peak": 1.0
+  },
+  "thread_mean_cpu_percent_whole_run": [
+    {
+      "names": [
+        "RenderThread (F"
+      ],
+      "mean_cpu_percent": 98.28
+    },
+    {
+      "names": [
+        "Main XThread (F"
+      ],
+      "mean_cpu_percent": 92.259
+    },
+    {
+      "names": [
+        "Job Manager - J"
+      ],
+      "mean_cpu_percent": 35.844
+    },
+    {
+      "names": [
+        "GPU Commands (F"
+      ],
+      "mean_cpu_percent": 13.051
+    }
+  ],
+  "graphics": {
+    "fence_wait": {
+      "count": 106373,
+      "total_us": 188553565,
+      "cpu_us": 752681,
+      "dropped_events": 0
+    },
+    "register_wait": {
+      "count": 94119,
+      "total_us": 67209008,
+      "cpu_us": 312104,
+      "dropped_events": 0
+    },
+    "queue_acquire": {
+      "count": 140797,
+      "total_us": 2183423,
+      "cpu_us": 44509,
+      "dropped_events": 0
+    },
+    "graphics_pipeline": {
+      "count": 129,
+      "total_us": 967835,
+      "cpu_us": 549742,
+      "dropped_events": 0
+    }
+  },
+  "trace_quality": {
+    "dropped_frame_points": 1743,
+    "unmatched": {
+      "swap_without_written": 10,
+      "written_without_processed": 10,
+      "published_without_present": 73
+    },
+    "truncated_final_record": false
+  },
+  "limits": [
+    "Owner report receipt is approximate; exact slowdown onset and match-end boundary were not recorded.",
+    "Post-start time windows may include pause/replay/result screens; no screen recording was collected.",
+    "Output cadence is not simulation FPS. GPU stage durations overlap and cannot be summed.",
+    "Hot guest threads may include polling/spinning; CPU utilization does not establish useful work.",
+    "Principal GPU submission spans do not cover whole-frame GPU cost.",
+    "Near-continuous backend audio delivery does not establish audible quality.",
+    "No matched probes-off run or controlled earlier-build comparison was performed.",
+    "No root cause, performance fix or regression verdict established."
+  ],
+  "redraw_review": {
+    "paint_activity": {
+      "recorded_window_paints": {
+        "requested": 6447,
+        "forced": 6
+      },
+      "recorded_window_events": {
+        "custom_paint": 6447,
+        "exposed": 6,
+        "restored": 0
+      },
+      "ui_repaint_decisions": [
+        {
+          "registered_dialogs": 2,
+          "continuous": false,
+          "recorded_count": 6452
+        }
+      ],
+      "toast_repaint_decisions": [
+        {
+          "sleep_flag": 1,
+          "continuous": false,
+          "recorded_count": 6452
+        }
+      ]
+    },
+    "cadence_repeated_outputs": 6,
+    "cadence_host_presents": 6409,
+    "source": "Existing frame-analysis.json and source inspection of Window::OnPaint, ImGuiDrawer continuous repaint decisions and AchievementToastDialog."
+  },
+  "cpu_wait_review": {
+    "five_second_binned_window_means": [
+      {
+        "range_from_launch_s": [
+          75,
+          125
+        ],
+        "cpu_process": 271.018,
+        "cpu_render": 99.157,
+        "cpu_main": 97.264,
+        "cpu_jobs": 47.623,
+        "cpu_gpu": 9.777,
+        "paint": 19.36,
+        "fence": 69.008,
+        "register": 21.166,
+        "lock": 0.012,
+        "rss": 578.784
+      },
+      {
+        "range_from_launch_s": [
+          175,
+          275
+        ],
+        "cpu_process": 329.047,
+        "cpu_render": 97.109,
+        "cpu_main": 93.647,
+        "cpu_jobs": 89.301,
+        "cpu_gpu": 18.073,
+        "paint": 17.74,
+        "fence": 66.06,
+        "register": 15.402,
+        "lock": 0.021,
+        "rss": 597.455
+      }
+    ],
+    "units": {
+      "cpu_fields": "percent of one logical CPU; process is ps accounting, threads are counter deltas",
+      "paint": "host-paint calls/s",
+      "fence_register_lock": "completed cumulative wait wall-time delta divided by report interval, percent; overlapping scopes",
+      "rss": "MiB"
+    },
+    "detailed_long_fence_waits": {
+      "reason": "Resolve",
+      "count": 14826,
+      "wall_s": 147.608916,
+      "cpu_s": 0.110187,
+      "detail_filter": "Only recorded operations >=1 ms. Short waits remain in aggregate counters; details do not cover every wait."
+    },
+    "interpretation": "Repeated presentation/continuous UI repaint storm not supported by the trace. CPU utilization rises mainly in job-manager threads, with GPU Commands also rising. High guest CPU can include polling. Resolve waits are a large baseline cost but do not rise with the observed modest deterioration."
+  }
+}

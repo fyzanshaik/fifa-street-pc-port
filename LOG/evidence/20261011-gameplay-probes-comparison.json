@@ -1,0 +1,194 @@
+{
+  "date": "2026-10-11",
+  "purpose": "Check whether owner-reported slowdown reproduces without detailed runtime/GPU diagnostic probes.",
+  "sessions": [
+    {
+      "session": "20261011T152259.435263Z",
+      "detailed_probes": true,
+      "runtime_diagnostics": true,
+      "stack_sample": false,
+      "exit": {
+        "pid": 21389,
+        "exit_code": 0,
+        "stop_reason": "time_limit",
+        "shutdown_escalated": false,
+        "elapsed_seconds": 300.827
+      },
+      "owner_reports": [
+        {
+          "event": "owner_match_started_report",
+          "received_at_utc": "2026-10-11T15:24:10.887569+00:00",
+          "elapsed_seconds_approx": 71.452,
+          "note": "Owner report receipt, not an exact simulation boundary."
+        },
+        {
+          "event": "owner_deteriorated_and_match_finished_report",
+          "received_at_utc": "2026-10-11T15:28:13.981239+00:00",
+          "elapsed_seconds_approx": 314.546,
+          "note": "Owner says deteriorated a bit and match finished; receipt time only, onset and match-end times unspecified."
+        }
+      ],
+      "post_match_report_windows": [
+        {
+          "after_match_report_s": [
+            0,
+            20
+          ],
+          "cadence_measured_s": 10.083,
+          "new_outputs_per_s": 20.133,
+          "process_cpu_percent_mean": 268.43,
+          "repeated_outputs": 0
+        },
+        {
+          "after_match_report_s": [
+            20,
+            45
+          ],
+          "cadence_measured_s": 20.067,
+          "new_outputs_per_s": 19.584,
+          "process_cpu_percent_mean": 272.792,
+          "repeated_outputs": 0
+        },
+        {
+          "after_match_report_s": [
+            45,
+            75
+          ],
+          "cadence_measured_s": 25.183,
+          "new_outputs_per_s": 16.757,
+          "process_cpu_percent_mean": 271.853,
+          "repeated_outputs": 0
+        },
+        {
+          "after_match_report_s": [
+            75,
+            120
+          ],
+          "cadence_measured_s": 40.201,
+          "new_outputs_per_s": 19.651,
+          "process_cpu_percent_mean": 312.607,
+          "repeated_outputs": 0
+        },
+        {
+          "after_match_report_s": [
+            120,
+            165
+          ],
+          "cadence_measured_s": 40.183,
+          "new_outputs_per_s": 17.57,
+          "process_cpu_percent_mean": 327.233,
+          "repeated_outputs": 0
+        }
+      ]
+    },
+    {
+      "session": "20261011T154905.520993Z",
+      "detailed_probes": false,
+      "runtime_diagnostics": false,
+      "stack_sample": false,
+      "exit": {
+        "pid": 31946,
+        "exit_code": 0,
+        "stop_reason": "owner_done",
+        "shutdown_escalated": false,
+        "elapsed_seconds": 239.922
+      },
+      "owner_reports": [
+        {
+          "event": "owner_match_started_report",
+          "received_at_utc": "2026-10-11T15:50:17.313464+00:00",
+          "elapsed_seconds_approx": 71.792,
+          "note": "Owner report receipt; not an exact simulation boundary."
+        },
+        {
+          "event": "owner_slow_now_report",
+          "received_at_utc": "2026-10-11T15:51:04.700048+00:00",
+          "elapsed_seconds_approx": 119.179,
+          "note": "Owner reports deterioration started; receipt time only."
+        },
+        {
+          "event": "owner_done_report",
+          "received_at_utc": "2026-10-11T15:53:04.282252+00:00",
+          "elapsed_seconds_approx": 238.761,
+          "note": "Owner requested diagnostic stop; not a match-end report."
+        },
+        {
+          "event": "owner_foreground_slowdown_confirmation",
+          "received_at_utc": "2026-10-11T15:57:15.928044+00:00",
+          "note": "Owner confirms deterioration began while actively playing in foreground, before switching to chat. Post-run clarification, not a live gameplay boundary."
+        }
+      ],
+      "post_match_report_windows": [
+        {
+          "after_match_report_s": [
+            0,
+            20
+          ],
+          "cadence_measured_s": 15.084,
+          "new_outputs_per_s": 20.286,
+          "process_cpu_percent_mean": 263.685,
+          "repeated_outputs": 0
+        },
+        {
+          "after_match_report_s": [
+            20,
+            45
+          ],
+          "cadence_measured_s": 20.149,
+          "new_outputs_per_s": 11.862,
+          "process_cpu_percent_mean": 259.171,
+          "repeated_outputs": 1
+        },
+        {
+          "after_match_report_s": [
+            45,
+            75
+          ],
+          "cadence_measured_s": 25.266,
+          "new_outputs_per_s": 8.984,
+          "process_cpu_percent_mean": 257.123,
+          "repeated_outputs": 0
+        },
+        {
+          "after_match_report_s": [
+            75,
+            120
+          ],
+          "cadence_measured_s": 40.417,
+          "new_outputs_per_s": 9.724,
+          "process_cpu_percent_mean": 256.582,
+          "repeated_outputs": 1
+        },
+        {
+          "after_match_report_s": [
+            120,
+            165
+          ],
+          "cadence_measured_s": 40.483,
+          "new_outputs_per_s": 9.214,
+          "process_cpu_percent_mean": 263.007,
+          "repeated_outputs": 2
+        }
+      ]
+    }
+  ],
+  "controlled_factors": [
+    "same installed app/binary and persisted runtime settings",
+    "same earbuds endpoint and six-channel 48 kHz output reported by logs",
+    "no virtual input or automation, owner drove matches"
+  ],
+  "uncontrolled_factors": [
+    "match teams/arena and exact manual inputs not independently verified",
+    "gameplay scenes, replays, pauses and results not timestamped separately",
+    "shader cache state was preserved, not reset or matched",
+    "owner reports are receipt timestamps, not exact frame boundaries"
+  ],
+  "observations": [
+    "Second run has no runtime.jsonl; runtime/frame diagnostics and stack sampling disabled.",
+    "Second run reproduced falling output cadence while foreground and actively played, confirmed by owner.",
+    "Second-run CPU stays around 2.6 cores through sustained ~9\u201310 outputs/s segment; rising total CPU is not necessary for the symptom.",
+    "Detailed probes are not the sole cause; relative probe overhead cannot be estimated from unmatched live matches.",
+    "No stacks or detailed waits captured in second run, so useful work versus polling and GPU/readback waits remain unresolved."
+  ],
+  "next_check": "Targeted smooth/slow stack samples with accurate foreground/manual phase markers; keep runtime defaults and readback correctness unchanged."
+}

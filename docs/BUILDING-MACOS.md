@@ -506,7 +506,8 @@ Two environment variables control it:
 - `RESTREET_CONTROL_SOCKET` - absolute path of the Unix-domain socket the driver
   binds. Unset, the whole bridge is absent: the SDK's default input factory is
   used unchanged and no thread or socket is created.
-- `RESTREET_CONTROL_MODE` - `ai-ai` (default) or `human-ai`.
+- `RESTREET_CONTROL_MODE` - `ai-ai` (default), `human-ai`, or experimental
+  `agent-cpu` (requires rebuilding the host).
 
 Modes:
 
@@ -515,8 +516,14 @@ Modes:
 - `human-ai`: virtual pad 1 is added on guest user 1; every other device behaves
   as before (physical pads by ordinal, keyboard/mouse and synthetic devices on
   user 0). Keyboard-as-player-1 is not implemented and is not claimed.
+- `agent-cpu`: only virtual pad 0 is exposed on guest user 0; physical pads,
+  keyboard and other devices are excluded. Guest user 1 has no device assigned
+  by this policy. Team selection and CPU-opponent configuration remain manual
+  and unverified in-game. See [single-agent input](SINGLE-AGENT-INPUT.md) for
+  offline evidence and remaining gameplay checks.
 
-The socket lives under an owner-only directory and is created mode 0600. An
+The socket is created mode 0600. Newly created parent directories use mode 0700;
+existing directories keep their permissions. An
 existing regular file or another live bridge socket at that path is never
 unlinked: the driver fails explicitly and leaves the default input in place. A
 stale (dead) socket is replaced.
@@ -587,6 +594,9 @@ signs in; it only holds a button briefly.
 protocol codec, pad state, slot assignment and receiver server: slot 0/1 routing
 and isolation, big-endian guest state, packet/TTL/release, invalid
 player/axes/protocol, socket collision, client-death cleanup and shutdown/unlink.
+The suite also checks `agent-cpu` selection/routing and unavailable-slot rejection,
+then runs a Python CLI wire-format fixture against a test-double server. These
+tests do not establish controller detection or input consumption in the game.
 
 ### Keyboard mappings and normal play
 
@@ -663,9 +673,16 @@ part of this workflow.
 `scripts/apply-macos-credits.sh` adds `macOS port: fyzanshaik` beneath the
 upstream credit in the press-start and main-menu textures. It builds a separate
 private GameData profile: `data1.big` is cloned with APFS copy-on-write when
-available (a full file copy otherwise), and unrelated files are symlinked to
-your original extract. Original GameData is never written. No runtime rebuild
-is required.
+available (a full file copy otherwise), directories are real directories, and
+unrelated leaf files are symlinked to your original extract. Original GameData
+is never written. No runtime rebuild is required.
+
+The earlier profile layout linked entire directories. The pinned runtime treats
+those links as file entries, so its parent-plus-leaf open path can fail for
+`data/loc/locale.big` even though the host file exists. This caused a reproducible
+offline lookup failure matching a startup null read. Rebuild an old profile
+from the original extract with the corrected helper; changing texture bytes or
+rebuilding the runtime is unnecessary.
 
 This helper currently accepts only the exact supported menu archives already
 carrying the upstream installer's credit. Plain retail or other modified menu
@@ -690,7 +707,11 @@ extract and reinstall with `--force`. The profile can remain private for reuse.
 No original archives, fonts or preview artwork belong in Git. The helper uses
 a deterministic bitmap font and checks source/output hashes; its fixtures run
 with `bash scripts/test-macos-credits.sh`. Decoded previews and byte checks have
-passed; an actual game check of the added credit remains the owner's step.
+passed. `bash scripts/test-macos-credit-vfs.sh` additionally links the built
+runtime and checks old/new directory layouts and synthetic builder output; it
+requires the Mac runtime and SDK headers. The owner confirmed startup recovery
+and title-screen credit visibility after the directory-layout repair. Main-menu
+credit visibility remains a separate manual check.
 
 ## Updating the runtime (targeted rebuild)
 

@@ -45,7 +45,7 @@ constexpr uint64_t DeviceIdForPlayer(int player) {
 }
 
 // Which virtual pads the bridge exposes. Deliberately explicit: there is no
-// silent physical-pad fallback in ai-ai mode.
+// silent physical-pad fallback in the isolated modes.
 enum class Mode {
   // Virtual pads on guest user 0 and 1. Physical/keyboard devices are dropped
   // so they cannot contaminate either slot.
@@ -54,17 +54,61 @@ enum class Mode {
   // (user 0); only virtual pad 1 is added, on guest user 1. Keyboard-as-player-1
   // is not implemented and is not claimed.
   kHumanAi,
+  // Exactly one virtual pad, on guest user 0, for a tool/agent. No second virtual
+  // pad is exposed and no foreign device is routed, so this policy assigns no
+  // device to guest user 1. Team/CPU setup remains game configuration and is
+  // unverified here.
+  kAgentCpu,
 };
 
 constexpr const char* ModeName(Mode mode) {
-  return mode == Mode::kAiAi ? "ai-ai" : "human-ai";
+  switch (mode) {
+    case Mode::kAiAi: return "ai-ai";
+    case Mode::kHumanAi: return "human-ai";
+    case Mode::kAgentCpu: return "agent-cpu";
+  }
+  return "ai-ai";
 }
 
 // True when a player's virtual pad is exposed to the guest in this mode.
 constexpr bool PlayerBridged(Mode mode, int player) {
-  if (player == 0) return mode == Mode::kAiAi;
-  if (player == 1) return true;
+  switch (mode) {
+    case Mode::kAiAi: return player == 0 || player == 1;
+    case Mode::kHumanAi: return player == 1;
+    case Mode::kAgentCpu: return player == 0;
+  }
   return false;
+}
+
+namespace detail {
+
+constexpr bool StringEquals(const char* a, const char* b) {
+  if (a == nullptr || b == nullptr) {
+    return false;
+  }
+  while (*a != '\0' && *b != '\0') {
+    if (*a != *b) {
+      return false;
+    }
+    ++a;
+    ++b;
+  }
+  return *a == *b;
+}
+
+}  // namespace detail
+
+// Maps RESTREET_CONTROL_MODE text to a Mode. Unset or unrecognised text keeps
+// the historical fully-isolated default (ai-ai). Runtime-free, so it unit-tests
+// without the SDK; control_bridge.cpp calls it from the opt-in install path.
+inline Mode ModeFromName(const char* value) {
+  if (detail::StringEquals(value, "human-ai")) {
+    return Mode::kHumanAi;
+  }
+  if (detail::StringEquals(value, "agent-cpu")) {
+    return Mode::kAgentCpu;
+  }
+  return Mode::kAiAi;
 }
 
 enum class Command : uint8_t {

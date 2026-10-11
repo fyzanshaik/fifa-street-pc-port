@@ -18,10 +18,17 @@ transformed bytes back, so every other block keeps its exact original bytes and
 the existing logo and credit are untouched.
 
 Nothing is written into the original GameData. `build-profile` validates the
-source, then builds a preservation profile: a fresh owned directory holding
-symlinks to every unrelated original file plus an APFS copy-on-write clone of
-data1.big, edits only inside that clone and atomically publishes the finished
+source, then builds a preservation profile: a fresh owned directory whose
+directories are materialized as real directories, whose unrelated files are
+symlinks to the originals, and which holds an APFS copy-on-write clone of
+data1.big. It edits only inside that clone and atomically publishes the finished
 profile. The real game data is never opened for writing.
+
+Directories must be real, not symlinks: the pinned runtime classifies each entry
+from `dirent`'s `d_type`, so a symlinked directory is reported as a file and is
+never recursed into, which makes nested guest paths (for example
+`data/loc/locale.big`) unresolvable. Files stay symlinks, which preserves their
+bytes without copying them.
 
 The text mask is generated from a built-in bitmap font, so the output is
 deterministic on any machine and does not depend on the host OS or installed
@@ -631,8 +638,35 @@ def _populate_profile(staging: str, source: str) -> None:
     for name in sorted(os.listdir(source)):
         if name == "data1.big":
             continue
-        os.symlink(os.path.join(source, name), os.path.join(staging, name))
+        _link_entry(os.path.join(source, name), os.path.join(staging, name),
+                    frozenset((os.path.realpath(source),)))
     _clone_file(os.path.join(source, "data1.big"), os.path.join(staging, "data1.big"))
+
+
+def _link_entry(source_path: str, dest_path: str, ancestors: frozenset) -> None:
+    """Materialize one source entry into the profile.
+
+    Directories become real directories, because the pinned runtime classifies
+    entries from `dirent`'s `d_type` and never recurses into a symlinked
+    directory; a symlinked directory would be seen as a file and its children
+    would stay unreachable. Files stay symlinks so unrelated bytes are shared
+    with the original rather than copied.
+
+    `ancestors` holds the realpaths of the directories already entered on this
+    branch. A symlinked directory that re-enters one of them would recurse
+    forever, so that cycle is refused instead of followed.
+    """
+    if not os.path.isdir(source_path):
+        os.symlink(source_path, dest_path)
+        return
+    real = os.path.realpath(source_path)
+    if real in ancestors:
+        raise CreditPatchError(f"refusing symlinked directory cycle at {source_path}")
+    os.mkdir(dest_path)
+    nested = ancestors | {real}
+    for name in sorted(os.listdir(source_path)):
+        _link_entry(os.path.join(source_path, name),
+                    os.path.join(dest_path, name), nested)
 
 
 def _publish(staging: str, dest: str) -> None:
